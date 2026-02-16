@@ -292,6 +292,7 @@ export async function runDiscussion(
         rounds: round,
         decision: lastProposal,
         blocks: currentBlocks,
+        allRounds,
       };
     }
 
@@ -321,5 +322,6 @@ export async function runDiscussion(
     rounds: max_rounds,
     decision: null,
     blocks: Array.from(latestBlocks.values()),
+    allRounds,
   };
 }

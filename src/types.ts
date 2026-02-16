@@ -71,4 +71,5 @@ export interface SessionResult {
   rounds: number;
   decision: string | null;
   blocks: ConsensusBlock[];
+  allRounds: RoundEntry[];
 }
