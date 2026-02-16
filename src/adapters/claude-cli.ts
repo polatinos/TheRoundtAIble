@@ -15,8 +15,8 @@ export class ClaudeCliAdapter extends BaseAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await execa(this.command, ["--version"]);
-      return true;
+      const result = await execa("where", [this.command], { reject: false });
+      return result.exitCode === 0;
     } catch {
       return false;
     }
@@ -25,9 +25,14 @@ export class ClaudeCliAdapter extends BaseAdapter {
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
-    const result = await execa(this.command, ["-p", prompt, "--print"], {
+    // Claude reads from stdin when no -p flag is given.
+    // Use --print for non-interactive output.
+    // Unset CLAUDECODE to allow invocation from within another Claude session.
+    const result = await execa(this.command, ["--print"], {
+      input: prompt,
       timeout,
       reject: false,
+      env: { ...process.env, CLAUDECODE: "" },
     });
 
     if (result.exitCode !== 0) {

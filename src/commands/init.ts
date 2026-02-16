@@ -47,6 +47,7 @@ async function detectTools(): Promise<DetectedTool[]> {
   const tools: DetectedTool[] = [
     { name: "Claude", adapter: "claude-cli", command: "claude", available: false },
     { name: "Gemini", adapter: "gemini-cli", command: "gemini", available: false },
+    { name: "GPT", adapter: "openai-cli", command: "codex", available: false },
   ];
 
   for (const tool of tools) {
@@ -106,6 +107,10 @@ function generateConfig(
         command: "gemini",
         args: ["-p", "{prompt}"],
       },
+      "openai-cli": {
+        command: "codex",
+        args: ["exec", "{prompt}"],
+      },
       "openai-api": {
         model: "gpt-4o",
         env_key: "OPENAI_API_KEY",
@@ -157,6 +162,12 @@ export async function initCommand(): Promise<void> {
   console.log("");
   const enabledKnights: { name: string; adapter: string; fallback?: string }[] = [];
 
+  const FALLBACKS: Record<string, string> = {
+    "claude-cli": "claude-api",
+    "gemini-cli": "gemini-api",
+    "openai-cli": "openai-api",
+  };
+
   for (const tool of tools) {
     if (tool.available) {
       const use = await confirm(`  Enable ${tool.name}?`, true);
@@ -164,7 +175,7 @@ export async function initCommand(): Promise<void> {
         enabledKnights.push({
           name: tool.name,
           adapter: tool.adapter,
-          fallback: `${tool.name.toLowerCase()}-api`,
+          fallback: FALLBACKS[tool.adapter],
         });
       }
     } else {
@@ -176,18 +187,10 @@ export async function initCommand(): Promise<void> {
         enabledKnights.push({
           name: tool.name,
           adapter: tool.adapter,
-          fallback: `${tool.name.toLowerCase()}-api`,
+          fallback: FALLBACKS[tool.adapter],
         });
       }
     }
-  }
-
-  // GPT (always API-based)
-  const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
-  const gptHint = hasOpenAIKey ? "OPENAI_API_KEY detected" : "requires OPENAI_API_KEY";
-  const useGPT = await confirm(`  Enable GPT? ${chalk.dim(`(${gptHint})`)}`, hasOpenAIKey);
-  if (useGPT) {
-    enabledKnights.push({ name: "GPT", adapter: "openai-api" });
   }
 
   if (enabledKnights.length === 0) {

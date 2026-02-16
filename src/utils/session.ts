@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { RoundEntry, SessionStatus } from "../types.js";
@@ -22,9 +22,11 @@ export async function createSession(
   projectRoot: string,
   topic: string
 ): Promise<string> {
-  const date = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const time = now.toISOString().slice(11, 16).replace(":", "");
   const slug = slugify(topic);
-  const sessionName = `${date}-${slug}`;
+  const sessionName = `${date}-${time}-${slug}`;
   const sessionPath = join(projectRoot, ".roundtable", "sessions", sessionName);
 
   await mkdir(sessionPath, { recursive: true });
@@ -144,4 +146,67 @@ export async function updateStatus(
   };
 
   await writeFile(statusPath, JSON.stringify(updated, null, 2), "utf-8");
+}
+
+/**
+ * Read status.json from a session folder.
+ */
+export async function readStatus(sessionPath: string): Promise<SessionStatus | null> {
+  const statusPath = join(sessionPath, "status.json");
+  if (!existsSync(statusPath)) return null;
+
+  try {
+    const raw = await readFile(statusPath, "utf-8");
+    return JSON.parse(raw) as SessionStatus;
+  } catch {
+    return null;
+  }
+}
+
+export interface SessionInfo {
+  name: string;
+  path: string;
+  status: SessionStatus | null;
+  topic: string | null;
+}
+
+/**
+ * List all sessions in .roundtable/sessions/, sorted newest first.
+ */
+export async function listSessions(projectRoot: string): Promise<SessionInfo[]> {
+  const sessionsDir = join(projectRoot, ".roundtable", "sessions");
+  if (!existsSync(sessionsDir)) return [];
+
+  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const sessions: SessionInfo[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const sessionPath = join(sessionsDir, entry.name);
+    const status = await readStatus(sessionPath);
+
+    let topic: string | null = null;
+    const topicPath = join(sessionPath, "topic.md");
+    if (existsSync(topicPath)) {
+      const raw = await readFile(topicPath, "utf-8");
+      // Extract topic from "# Topic\n\n<topic>"
+      const match = raw.match(/^# Topic\s*\n\n(.+)/m);
+      topic = match?.[1]?.trim() || raw.trim();
+    }
+
+    sessions.push({ name: entry.name, path: sessionPath, status, topic });
+  }
+
+  // Sort newest first (session names start with date)
+  sessions.sort((a, b) => b.name.localeCompare(a.name));
+  return sessions;
+}
+
+/**
+ * Find the most recent session folder.
+ */
+export async function findLatestSession(projectRoot: string): Promise<SessionInfo | null> {
+  const sessions = await listSessions(projectRoot);
+  return sessions[0] || null;
 }

@@ -1,13 +1,13 @@
 import { execa } from "execa";
 import { BaseAdapter } from "./base.js";
 
-export class GeminiCliAdapter extends BaseAdapter {
-  readonly name = "Gemini";
+export class OpenAICliAdapter extends BaseAdapter {
+  readonly name = "GPT";
 
   private command: string;
   private defaultTimeout: number;
 
-  constructor(command: string = "gemini", timeoutMs: number = 120_000) {
+  constructor(command: string = "codex", timeoutMs: number = 120_000) {
     super();
     this.command = command;
     this.defaultTimeout = timeoutMs;
@@ -25,17 +25,21 @@ export class GeminiCliAdapter extends BaseAdapter {
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
-    // Gemini docs: "-p/--prompt appended to input on stdin (if any)"
-    // Pass prompt via stdin to avoid command line length limits
-    const result = await execa(this.command, ["-p", ""], {
-      input: prompt,
-      timeout,
-      reject: false,
-    });
+    // Codex docs: "If not provided as an argument (or if `-` is used),
+    // instructions are read from stdin"
+    const result = await execa(
+      this.command,
+      ["exec", "-", "--sandbox", "read-only", "-o", "-"],
+      {
+        input: prompt,
+        timeout,
+        reject: false,
+      }
+    );
 
     if (result.exitCode !== 0) {
       const errorMsg = result.stderr || result.stdout || "Unknown error";
-      throw new Error(`Gemini CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      throw new Error(`Codex CLI failed (exit ${result.exitCode}): ${errorMsg}`);
     }
 
     return result.stdout;

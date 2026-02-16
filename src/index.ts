@@ -4,13 +4,18 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { discussCommand } from "./commands/discuss.js";
+import { applyCommand } from "./commands/apply.js";
+import { summonCommand } from "./commands/summon.js";
+import { listCommand } from "./commands/list.js";
+import { statusCommand } from "./commands/status.js";
+import { chronicleCommand } from "./commands/chronicle.js";
 
 const program = new Command();
 
 program
   .name("roundtable")
   .description(
-    "TheRoundtAIble — Where no AI is King, but all serve the Code."
+    "TheRoundtAIble \u2014 Where no AI is King, but all serve the Code."
   )
   .version("0.1.0");
 
@@ -40,30 +45,62 @@ program
 
 program
   .command("status")
-  .description("Show the status of the current discussion")
-  .action(() => {
-    console.log(chalk.yellow("Coming soon — roundtable status"));
+  .description("Show the status of the latest discussion")
+  .action(async () => {
+    try {
+      await statusCommand();
+    } catch (error) {
+      console.error(chalk.red("Status failed:"), error);
+      process.exit(1);
+    }
   });
 
 program
   .command("apply")
   .description("Apply the consensus decision (Lead Knight executes)")
-  .action(() => {
-    console.log(chalk.yellow("Coming soon — roundtable apply"));
+  .action(async () => {
+    try {
+      await applyCommand();
+    } catch (error) {
+      console.error(chalk.red("Apply failed:"), error);
+      process.exit(1);
+    }
   });
 
 program
   .command("summon")
   .description("Start a discussion based on current git diff")
-  .action(() => {
-    console.log(chalk.yellow("Coming soon — roundtable summon"));
+  .action(async () => {
+    try {
+      await summonCommand();
+    } catch (error) {
+      console.error(chalk.red("Summon failed:"), error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("list")
+  .description("List all discussion sessions")
+  .action(async () => {
+    try {
+      await listCommand();
+    } catch (error) {
+      console.error(chalk.red("List failed:"), error);
+      process.exit(1);
+    }
   });
 
 program
   .command("chronicle")
   .description("View the decision log")
-  .action(() => {
-    console.log(chalk.yellow("Coming soon — roundtable chronicle"));
+  .action(async () => {
+    try {
+      await chronicleCommand();
+    } catch (error) {
+      console.error(chalk.red("Chronicle failed:"), error);
+      process.exit(1);
+    }
   });
 
 program.parse();

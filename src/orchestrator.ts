@@ -7,7 +7,7 @@ import type {
   ConsensusBlock,
   SessionResult,
 } from "./types.js";
-import { BaseAdapter } from "./adapters/base.js";
+import { BaseAdapter, classifyError, AdapterError } from "./adapters/base.js";
 import { checkConsensus, summarizeConsensus } from "./consensus.js";
 import { buildSystemPrompt } from "./utils/prompt.js";
 import { buildContext } from "./utils/context.js";
@@ -23,7 +23,7 @@ import { appendToChronicle } from "./utils/chronicle.js";
  * Select the Lead Knight based on capabilities matching the topic.
  * Falls back to highest priority knight.
  */
-function selectLeadKnight(
+export function selectLeadKnight(
   knights: KnightConfig[],
   blocks: ConsensusBlock[]
 ): KnightConfig {
@@ -106,6 +106,9 @@ export async function runDiscussion(
         `Onderwerp: ${topic}`,
         "",
         context.gitBranch ? `Git branch: ${context.gitBranch}` : "",
+        context.gitDiff
+          ? `Git diff (huidige wijzigingen):\n\`\`\`\n${context.gitDiff.slice(0, 3000)}\n\`\`\``
+          : "",
         context.recentCommits
           ? `Recente commits:\n${context.recentCommits}`
           : "",
@@ -116,13 +119,22 @@ export async function runDiscussion(
         .filter(Boolean)
         .join("\n");
 
+      // Knight colors for visual distinction
+      const knightColors: Record<string, (text: string) => string> = {
+        Claude: chalk.hex("#D97706"),  // amber/orange
+        Gemini: chalk.hex("#3B82F6"),  // blue
+        GPT: chalk.hex("#10B981"),     // green
+      };
+      const knightColor = knightColors[knight.name] || chalk.white;
+      const divider = knightColor("─".repeat(50));
+
       // Execute
-      const spinner = ora(`${knight.name} is thinking...`).start();
+      const spinner = ora(knightColor(`${knight.name} is thinking...`)).start();
 
       try {
         const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
         const response = await adapter.execute(fullPrompt, timeoutMs);
-        spinner.succeed(`${knight.name} responded`);
+        spinner.stop();
 
         // Parse consensus
         const consensus = adapter.parseConsensus(response, round);
@@ -137,23 +149,61 @@ export async function runDiscussion(
 
         allRounds.push(entry);
 
+        // Show full knight response as a chat message
+        console.log(divider);
+        console.log(knightColor(`  ${knight.name}`) + chalk.dim(` (Round ${round})`));
+        console.log(divider);
+
+        // Strip JSON consensus block from display
+        const displayResponse = response
+          .replace(/```json[\s\S]*?```/g, "")
+          .replace(/\{[^{}]*"consensus_score"[^{}]*\}/g, "")
+          .trim();
+
+        // Indent each line for readability
+        const indented = displayResponse
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n");
+        console.log(chalk.white(indented));
+
+        // Score bar
         if (consensus) {
           latestBlocks.set(knight.name, consensus);
+          const score = consensus.consensus_score;
+          const filled = "█".repeat(score);
+          const empty = "░".repeat(10 - score);
+          const scoreColor = score >= 9 ? chalk.green : score >= 6 ? chalk.yellow : chalk.red;
+
+          console.log("");
           console.log(
-            chalk.dim(
-              `  Score: ${consensus.consensus_score}/10` +
-                (consensus.pending_issues.length > 0
-                  ? ` | Pending: ${consensus.pending_issues.join(", ")}`
-                  : "")
-            )
+            `  ${knightColor(knight.name)} score: ${scoreColor(`${filled}${empty} ${score}/10`)}`
           );
+          if (consensus.agrees_with.length > 0) {
+            console.log(chalk.dim(`  Eens met: ${consensus.agrees_with.join(", ")}`));
+          }
+          if (consensus.pending_issues.length > 0) {
+            console.log(chalk.yellow(`  Open punten: ${consensus.pending_issues.join(", ")}`));
+          }
         } else {
-          console.log(chalk.yellow(`  No consensus block found in response`));
+          console.log(chalk.yellow(`\n  (geen consensus blok gevonden in response)`));
         }
+
+        console.log("");
       } catch (error) {
         spinner.fail(`${knight.name} failed`);
-        const errMsg = error instanceof Error ? error.message : String(error);
-        console.log(chalk.red(`  Error: ${errMsg}`));
+        const classified = classifyError(error, knight.name);
+        const hint: Record<string, string> = {
+          not_installed: `Is "${knight.adapter}" installed and in PATH?`,
+          timeout: "Consider increasing timeout_per_turn_seconds in config.",
+          auth: "Check your API key or subscription status.",
+          api: "The API returned an error. Try again later.",
+          unknown: "",
+        };
+        console.log(chalk.red(`  Error (${classified.kind}): ${classified.message}`));
+        if (hint[classified.kind]) {
+          console.log(chalk.dim(`  Hint: ${hint[classified.kind]}`));
+        }
       }
     }
 
