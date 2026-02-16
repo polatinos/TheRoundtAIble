@@ -11,6 +11,29 @@ const rl = () =>
   createInterface({ input: process.stdin, output: process.stdout });
 
 /**
+ * Ask the user whether to use parley (review each file) or no parley (write all).
+ * Returns true for noparley mode.
+ */
+async function askParleyMode(): Promise<boolean> {
+  console.log(chalk.bold("\n  How shall the code be written?\n"));
+  console.log(`  ${chalk.bold("1.")} ${chalk.green("Parley")} — review each file before writing`);
+  console.log(`  ${chalk.bold("2.")} ${chalk.red("No Parley")} — write everything, no questions asked\n`);
+
+  const r = rl();
+  const answer = await r.question(chalk.bold.yellow("  Your call, Your Majesty? [1/2] "));
+  r.close();
+
+  const choice = answer.trim();
+  if (choice === "2") {
+    console.log(chalk.red("\n  No Parley it is. Bold move.\n"));
+    return true;
+  }
+
+  console.log(chalk.green("\n  Parley mode. Wise choice.\n"));
+  return false;
+}
+
+/**
  * The `roundtable discuss` command.
  */
 export async function discussCommand(topic: string): Promise<void> {
@@ -91,8 +114,8 @@ async function handleConsensus(result: SessionResult): Promise<void> {
     answer.trim().toLowerCase() === "ja";
 
   if (confirmed) {
-    console.log(chalk.dim("\n  The King has spoken. Executing...\n"));
-    await applyCommand(false);
+    const noparley = await askParleyMode();
+    await applyCommand(noparley);
   } else {
     console.log(chalk.dim('  The decision awaits. Run `roundtable apply` when ready.'));
   }
@@ -182,8 +205,8 @@ async function handleNoConsensus(
   });
 
   // Apply immediately
-  console.log(chalk.dim("  Executing the King's decree...\n"));
-  await applyCommand(false);
+  const noparley = await askParleyMode();
+  await applyCommand(noparley);
 }
 
 interface KnightProposal {

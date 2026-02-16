@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig, ConfigError } from "../utils/config.js";
@@ -14,6 +15,32 @@ import {
 } from "../utils/file-writer.js";
 import type { ConsensusBlock } from "../types.js";
 
+const rl = () =>
+  createInterface({ input: process.stdin, output: process.stdout });
+
+/**
+ * Ask the user whether to use parley (review each file) or no parley (write all).
+ * Returns true for noparley mode.
+ */
+async function askParleyMode(): Promise<boolean> {
+  console.log(chalk.bold("  How shall the code be written?\n"));
+  console.log(`  ${chalk.bold("1.")} ${chalk.green("Parley")} — review each file before writing`);
+  console.log(`  ${chalk.bold("2.")} ${chalk.red("No Parley")} — write everything, no questions asked\n`);
+
+  const r = rl();
+  const answer = await r.question(chalk.bold.yellow("  Your call, Your Majesty? [1/2] "));
+  r.close();
+
+  const choice = answer.trim();
+  if (choice === "2") {
+    console.log(chalk.red("\n  No Parley it is. Bold move.\n"));
+    return true;
+  }
+
+  console.log(chalk.green("\n  Parley mode. Wise choice.\n"));
+  return false;
+}
+
 /**
  * The `roundtable apply` command.
  * Reads the latest session's decision and executes it via the Lead Knight.
@@ -23,7 +50,8 @@ import type { ConsensusBlock } from "../types.js";
  *   --parley (default) — shows each file, asks for confirmation
  *   --noparley — writes everything directly ("dangerous mode")
  */
-export async function applyCommand(noparley = false): Promise<void> {
+export async function applyCommand(initialNoparley = false): Promise<void> {
+  let noparley = initialNoparley;
   const projectRoot = process.cwd();
 
   // Load config
@@ -96,7 +124,12 @@ export async function applyCommand(noparley = false): Promise<void> {
   console.log(chalk.bold("\n  The council has spoken.\n"));
   console.log(chalk.dim(`  Session:     ${session.name}`));
   console.log(chalk.dim(`  Topic:       ${session.topic || "unknown"}`));
-  console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}`));
+  console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}\n`));
+
+  // If noparley wasn't set via --noparley flag, ask the user
+  if (!noparley) {
+    noparley = await askParleyMode();
+  }
 
   if (noparley) {
     console.log(chalk.red.bold(`  Mode:        NO PARLEY`));
@@ -126,7 +159,11 @@ export async function applyCommand(noparley = false): Promise<void> {
 
   // Build execution prompt with file format instructions
   const executionPrompt = [
-    `You are ${leadKnight.name}, the Lead Knight chosen to execute the following decision.`,
+    "CRITICAL: You are running in TEXT-ONLY output mode.",
+    "You CANNOT write files, use tools, or edit anything.",
+    "You can ONLY output plain text. That is your sole capability.",
+    "",
+    `You are ${leadKnight.name}, the Lead Knight chosen to implement the following decision.`,
     `Your capabilities: ${leadKnight.capabilities.join(", ")}`,
     "",
     "DECISION TO IMPLEMENT:",
@@ -134,8 +171,8 @@ export async function applyCommand(noparley = false): Promise<void> {
     decision,
     "---",
     "",
-    "IMPORTANT — OUTPUT FORMAT:",
-    "For EACH file you create or modify, use this EXACT format:",
+    "OUTPUT FORMAT — follow this EXACTLY:",
+    "For EACH file, output this pattern:",
     "",
     "FILE: path/to/file.ts",
     "```typescript",
@@ -143,11 +180,13 @@ export async function applyCommand(noparley = false): Promise<void> {
     "```",
     "",
     "Rules:",
-    "- Use FILE: before every code block with the full relative path",
-    "- Give the COMPLETE file content, not just snippets or diffs",
+    "- Start each file with FILE: followed by the relative path",
+    "- Then a fenced code block with the COMPLETE file content",
+    "- Do NOT use partial snippets or diffs — give the FULL file",
     "- Include ALL files needed to implement the decision",
-    "- Do not explain — just output the files",
-    "- Be precise and thorough",
+    "- Do NOT ask for permission — just output the text",
+    "- Do NOT explain anything — ONLY output FILE: blocks",
+    "- No commentary, no questions, no tool usage — just the files",
   ].join("\n");
 
   // Execute

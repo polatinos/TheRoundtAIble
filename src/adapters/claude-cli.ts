@@ -27,12 +27,16 @@ export class ClaudeCliAdapter extends BaseAdapter {
 
     // Claude reads from stdin when no -p flag is given.
     // Use --print for non-interactive output.
-    // Unset CLAUDECODE to allow invocation from within another Claude session.
+    // Remove CLAUDECODE env var entirely to allow invocation from within VS Code
+    // terminal where Claude Code is running. Empty string is not enough.
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+
     const result = await execa(this.command, ["--print"], {
       input: prompt,
       timeout,
       reject: false,
-      env: { ...process.env, CLAUDECODE: "" },
+      env,
     });
 
     if (result.exitCode !== 0) {

@@ -25,7 +25,7 @@ export interface AdapterApiConfig {
   env_key: string;
 }
 
-export type AdapterConfig = AdapterCliConfig | AdapterApiConfig;
+export type AdapterConfig = Record<string, AdapterCliConfig | AdapterApiConfig>;
 
 export interface RoundtableConfig {
   version: string;
@@ -34,7 +34,7 @@ export interface RoundtableConfig {
   knights: KnightConfig[];
   rules: RulesConfig;
   chronicle: string;
-  adapter_config: Record<string, AdapterConfig>;
+  adapter_config: AdapterConfig;
 }
 
 export interface ConsensusBlock {
@@ -63,6 +63,8 @@ export interface SessionStatus {
   consensus_reached: boolean;
   started_at: string;
   updated_at: string;
+  lead_knight?: string;
+  decisions_hash?: string;
 }
 
 export interface SessionResult {
@@ -72,4 +74,19 @@ export interface SessionResult {
   decision: string | null;
   blocks: ConsensusBlock[];
   allRounds: RoundEntry[];
+}
+
+export interface FileChange {
+  path: string;
+  action: "create" | "modify" | "delete";
+  content?: string;
+}
+
+export interface Changeset {
+  generated_at: string;
+  decisions_hash: string;
+  lead_knight: string;
+  git_head: string;
+  session_id: string;
+  files: FileChange[];
 }
