@@ -13,8 +13,8 @@ export async function statusCommand(): Promise<void> {
   const session = await findLatestSession(projectRoot);
 
   if (!session) {
-    console.log(chalk.yellow("\n  No sessions found."));
-    console.log(chalk.dim('  Run `roundtable discuss "topic"` to start one.\n'));
+    console.log(chalk.yellow("\n  The table is empty. No sessions yet."));
+    console.log(chalk.dim('  Run `roundtable discuss "topic"` to summon the knights.\n'));
     return;
   }
 
@@ -25,7 +25,7 @@ export async function statusCommand(): Promise<void> {
   console.log(`  Topic:     ${chalk.white(session.topic || "—")}`);
   console.log(`  Phase:     ${phaseDisplay(status?.phase || "unknown")}`);
   console.log(`  Round:     ${status?.round || 0}`);
-  console.log(`  Consensus: ${status?.consensus_reached ? chalk.green("Yes") : chalk.yellow("No")}`);
+  console.log(`  Consensus: ${status?.consensus_reached ? chalk.green("Yes — miracles happen") : chalk.yellow("No — still arguing")}`);
 
   if (status?.current_knight) {
     console.log(`  Knight:    ${chalk.cyan(status.current_knight)}`);
@@ -42,10 +42,10 @@ export async function statusCommand(): Promise<void> {
   if (existsSync(decisionsPath)) {
     const content = await readFile(decisionsPath, "utf-8");
     const preview = content.split("\n").slice(0, 10).join("\n");
-    console.log(chalk.bold("\n  Decision preview:\n"));
+    console.log(chalk.bold("\n  The verdict:\n"));
     console.log(chalk.dim(indent(preview)));
     if (content.split("\n").length > 10) {
-      console.log(chalk.dim("  ...(see full file)"));
+      console.log(chalk.dim("  ...(the rest is in decisions.md)"));
     }
   }
 
@@ -55,15 +55,15 @@ export async function statusCommand(): Promise<void> {
 function phaseDisplay(phase: string): string {
   switch (phase) {
     case "discussing":
-      return chalk.blue("Discussing");
+      return chalk.blue("Discussing — swords are drawn");
     case "consensus_reached":
-      return chalk.green("Consensus Reached");
+      return chalk.green("Consensus — ready to apply");
     case "escalated":
-      return chalk.yellow("Escalated to User");
+      return chalk.yellow("Escalated — the knights need your wisdom");
     case "applying":
-      return chalk.cyan("Applying...");
+      return chalk.cyan("Applying — the knight is writing...");
     case "completed":
-      return chalk.gray("Completed");
+      return chalk.gray("Completed — the deed is done");
     default:
       return chalk.dim(phase);
   }

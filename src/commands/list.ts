@@ -2,11 +2,19 @@ import chalk from "chalk";
 import { listSessions } from "../utils/session.js";
 
 const PHASE_ICONS: Record<string, string> = {
-  discussing: "\u23F3",     // hourglass
+  discussing: "\u2694\uFE0F",     // swords
   consensus_reached: "\u2705", // check
   escalated: "\u26A0\uFE0F",  // warning
   applying: "\u2699\uFE0F",   // gear
   completed: "\u2728",       // sparkles
+};
+
+const PHASE_LABELS: Record<string, string> = {
+  discussing: "debating",
+  consensus_reached: "consensus",
+  escalated: "escalated",
+  applying: "executing",
+  completed: "done",
 };
 
 const PHASE_COLORS: Record<string, (text: string) => string> = {
@@ -26,16 +34,17 @@ export async function listCommand(): Promise<void> {
   const sessions = await listSessions(projectRoot);
 
   if (sessions.length === 0) {
-    console.log(chalk.yellow("\n  No sessions found."));
+    console.log(chalk.yellow("\n  No battles fought yet."));
     console.log(chalk.dim('  Run `roundtable discuss "topic"` to start one.\n'));
     return;
   }
 
-  console.log(chalk.bold(`\n  Sessions (${sessions.length}):\n`));
+  console.log(chalk.bold(`\n  The Archives — ${sessions.length} session(s)\n`));
 
   for (const session of sessions) {
     const phase = session.status?.phase || "unknown";
     const icon = PHASE_ICONS[phase] || "?";
+    const label = PHASE_LABELS[phase] || phase;
     const colorFn = PHASE_COLORS[phase] || chalk.white;
     const round = session.status?.round || 0;
     const topic = session.topic
@@ -45,10 +54,10 @@ export async function listCommand(): Promise<void> {
       : "—";
 
     console.log(
-      `  ${icon} ${colorFn(phase.padEnd(18))} ${chalk.dim(session.name)}`
+      `  ${icon} ${colorFn(label.padEnd(12))} ${chalk.dim(session.name)}`
     );
     console.log(
-      `    ${chalk.white(topic)} ${chalk.dim(`(round ${round})`)}`
+      `    ${chalk.white(topic)} ${chalk.dim(`(${round} round${round !== 1 ? "s" : ""})`)}`
     );
     console.log("");
   }

@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name("roundtable")
   .description(
-    "TheRoundtAIble \u2014 Where no AI is King, but all serve the Code."
+    "TheRoundtAIble — Where no AI is King, but all serve the Code."
   )
   .version("0.1.0");
 
@@ -26,7 +26,7 @@ program
     try {
       await initCommand();
     } catch (error) {
-      console.error(chalk.red("Init failed:"), error);
+      console.error(chalk.red("Well, that didn't go as planned:"), error);
       process.exit(1);
     }
   });
@@ -38,7 +38,7 @@ program
     try {
       await discussCommand(topic);
     } catch (error) {
-      console.error(chalk.red("Discussion failed:"), error);
+      console.error(chalk.red("The debate ended in chaos:"), error);
       process.exit(1);
     }
   });
@@ -50,7 +50,7 @@ program
     try {
       await statusCommand();
     } catch (error) {
-      console.error(chalk.red("Status failed:"), error);
+      console.error(chalk.red("Well, that didn't go as planned:"), error);
       process.exit(1);
     }
   });
@@ -58,11 +58,12 @@ program
 program
   .command("apply")
   .description("Apply the consensus decision (Lead Knight executes)")
-  .action(async () => {
+  .option("--noparley", "Skip file confirmation — write everything directly (dangerous)")
+  .action(async (options: { noparley?: boolean }) => {
     try {
-      await applyCommand();
+      await applyCommand(options.noparley ?? false);
     } catch (error) {
-      console.error(chalk.red("Apply failed:"), error);
+      console.error(chalk.red("The knight dropped their sword:"), error);
       process.exit(1);
     }
   });
@@ -74,7 +75,7 @@ program
     try {
       await summonCommand();
     } catch (error) {
-      console.error(chalk.red("Summon failed:"), error);
+      console.error(chalk.red("The summoning ritual failed:"), error);
       process.exit(1);
     }
   });
@@ -86,7 +87,7 @@ program
     try {
       await listCommand();
     } catch (error) {
-      console.error(chalk.red("List failed:"), error);
+      console.error(chalk.red("Well, that didn't go as planned:"), error);
       process.exit(1);
     }
   });
@@ -98,7 +99,7 @@ program
     try {
       await chronicleCommand();
     } catch (error) {
-      console.error(chalk.red("Chronicle failed:"), error);
+      console.error(chalk.red("The chronicles are... unreadable:"), error);
       process.exit(1);
     }
   });

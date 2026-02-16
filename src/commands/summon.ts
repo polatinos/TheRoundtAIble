@@ -21,7 +21,7 @@ export async function summonCommand(): Promise<void> {
     throw error;
   }
 
-  console.log(chalk.dim("\n  Analyzing git changes...\n"));
+  console.log(chalk.dim("\n  Reading the git scrolls...\n"));
 
   // Get git context
   const [diff, branch, commits] = await Promise.all([
@@ -31,8 +31,8 @@ export async function summonCommand(): Promise<void> {
   ]);
 
   if (!diff) {
-    console.log(chalk.yellow("  No git changes detected (no staged or unstaged diff)."));
-    console.log(chalk.dim("  Make some changes first, then run `roundtable summon` again.\n"));
+    console.log(chalk.yellow("  Nothing to review. The code rests in peace."));
+    console.log(chalk.dim("  Make some changes first, then summon again.\n"));
     return;
   }
 
@@ -53,7 +53,7 @@ export async function summonCommand(): Promise<void> {
   const diffPreview = diff.slice(0, 500).replace(/\n/g, " ").trim();
   const topic = `Review de huidige wijzigingen op branch "${branch || "unknown"}". ${fileCount} bestand(en) gewijzigd. Diff preview: ${diffPreview}`;
 
-  console.log(chalk.bold(`\n  Starting review discussion...\n`));
+  console.log(chalk.bold(`\n  The knights shall review your changes...\n`));
 
   // Delegate to discuss command
   await discussCommand(topic);

@@ -44,6 +44,49 @@ export function selectLeadKnight(
   return [...knights].sort((a, b) => a.priority - b.priority)[0];
 }
 
+/** Thinking messages per knight — shown while waiting for response */
+const THINKING_MESSAGES: Record<string, string[]> = {
+  Claude: [
+    "sharpens their arguments...",
+    "is architecting a rebuttal...",
+    "considers the elegant solution...",
+    "mutters about clean code...",
+  ],
+  Gemini: [
+    "drafts a 12-step plan...",
+    "sees the bigger picture...",
+    "is planning the plan...",
+    "prepares a strategic response...",
+  ],
+  GPT: [
+    "just wants to ship it...",
+    "prepares a practical take...",
+    "cuts through the noise...",
+    "is getting impatient...",
+  ],
+};
+
+function getThinkingMessage(knightName: string): string {
+  const messages = THINKING_MESSAGES[knightName] || [
+    "is thinking...",
+    "prepares their response...",
+  ];
+  return messages[Math.floor(Math.random() * messages.length)];
+}
+
+/** Round headers with personality */
+function roundHeader(round: number, maxRounds: number): string {
+  const headers = [
+    `ROUND ${round} — Let the debate begin`,
+    `ROUND ${round} — The plot thickens`,
+    `ROUND ${round} — Will they ever agree?`,
+    `ROUND ${round} — The final stand`,
+    `ROUND ${round} — Last chance for consensus`,
+  ];
+  const idx = Math.min(round - 1, headers.length - 1);
+  return round <= headers.length ? headers[idx] : `ROUND ${round}/${maxRounds}`;
+}
+
 /**
  * Run a full discussion between knights until consensus or max rounds.
  */
@@ -56,13 +99,13 @@ export async function runDiscussion(
   const { max_rounds, consensus_threshold } = config.rules;
 
   // Build project context
-  const contextSpinner = ora("Building project context...").start();
+  const contextSpinner = ora("  Gathering intel from the codebase...").start();
   const context = await buildContext(projectRoot, config);
-  contextSpinner.succeed("Context ready");
+  contextSpinner.succeed("  Context assembled");
 
   // Create session
   const sessionPath = await createSession(projectRoot, topic);
-  console.log(chalk.dim(`Session: ${sessionPath}`));
+  console.log(chalk.dim(`  Session: ${sessionPath}`));
 
   // Sort knights by priority
   const sortedKnights = [...config.knights].sort(
@@ -73,12 +116,12 @@ export async function runDiscussion(
   const latestBlocks: Map<string, ConsensusBlock> = new Map();
 
   for (let round = 1; round <= max_rounds; round++) {
-    console.log(chalk.bold.blue(`\n--- Round ${round}/${max_rounds} ---\n`));
+    console.log(chalk.bold.blue(`\n  ${roundHeader(round, max_rounds)}\n`));
 
     for (const knight of sortedKnights) {
       const adapter = adapters.get(knight.adapter);
       if (!adapter) {
-        console.log(chalk.yellow(`  Skipping ${knight.name}: adapter not available`));
+        console.log(chalk.yellow(`  ${knight.name} didn't show up today. Typical.`));
         continue;
       }
 
@@ -129,7 +172,8 @@ export async function runDiscussion(
       const divider = knightColor("─".repeat(50));
 
       // Execute
-      const spinner = ora(knightColor(`${knight.name} is thinking...`)).start();
+      const thinkMsg = getThinkingMessage(knight.name);
+      const spinner = ora(knightColor(`  ${knight.name} ${thinkMsg}`)).start();
 
       try {
         const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
@@ -171,8 +215,8 @@ export async function runDiscussion(
         if (consensus) {
           latestBlocks.set(knight.name, consensus);
           const score = consensus.consensus_score;
-          const filled = "█".repeat(score);
-          const empty = "░".repeat(10 - score);
+          const filled = "\u2588".repeat(score);
+          const empty = "\u2591".repeat(10 - score);
           const scoreColor = score >= 9 ? chalk.green : score >= 6 ? chalk.yellow : chalk.red;
 
           console.log("");
@@ -180,18 +224,18 @@ export async function runDiscussion(
             `  ${knightColor(knight.name)} score: ${scoreColor(`${filled}${empty} ${score}/10`)}`
           );
           if (consensus.agrees_with.length > 0) {
-            console.log(chalk.dim(`  Eens met: ${consensus.agrees_with.join(", ")}`));
+            console.log(chalk.dim(`  Agrees with: ${consensus.agrees_with.join(", ")}`));
           }
           if (consensus.pending_issues.length > 0) {
-            console.log(chalk.yellow(`  Open punten: ${consensus.pending_issues.join(", ")}`));
+            console.log(chalk.yellow(`  Open issues: ${consensus.pending_issues.join(", ")}`));
           }
         } else {
-          console.log(chalk.yellow(`\n  (geen consensus blok gevonden in response)`));
+          console.log(chalk.yellow(`\n  (no consensus block found — the knight forgot the rules)`));
         }
 
         console.log("");
       } catch (error) {
-        spinner.fail(`${knight.name} failed`);
+        spinner.fail(`  ${knight.name} crashed and burned`);
         const classified = classifyError(error, knight.name);
         const hint: Record<string, string> = {
           not_installed: `Is "${knight.adapter}" installed and in PATH?`,
@@ -213,7 +257,7 @@ export async function runDiscussion(
     // Check consensus after each complete round
     const currentBlocks = Array.from(latestBlocks.values());
     if (checkConsensus(currentBlocks, consensus_threshold)) {
-      console.log(chalk.bold.green("\nConsensus reached!"));
+      console.log(chalk.bold.green("\n  Against all odds... they actually agree."));
       console.log(summarizeConsensus(currentBlocks));
 
       // Find the proposal from the last round
@@ -237,7 +281,7 @@ export async function runDiscussion(
       const leadKnight = selectLeadKnight(config.knights, currentBlocks);
       await appendToChronicle(projectRoot, config.chronicle, {
         topic,
-        outcome: `Consensus bereikt in ${round} ronde(s). Lead Knight: ${leadKnight.name}.\n\n${lastProposal}`,
+        outcome: `Consensus in ${round} round(s). Lead Knight: ${leadKnight.name}.\n\n${lastProposal}`,
         knights: currentBlocks.map((b) => b.knight),
         date: new Date().toISOString().slice(0, 10),
       });
@@ -255,14 +299,14 @@ export async function runDiscussion(
     if (round >= config.rules.escalate_to_user_after && round < max_rounds) {
       console.log(
         chalk.yellow(
-          `\nRound ${round}: No consensus yet. ${max_rounds - round} round(s) remaining.`
+          `\n  Round ${round}: Still no consensus. ${max_rounds - round} round(s) left before escalation.`
         )
       );
     }
   }
 
   // Max rounds reached without consensus
-  console.log(chalk.bold.yellow("\nMax rounds reached — no consensus."));
+  console.log(chalk.bold.yellow("\n  The knights have agreed to disagree. Your move."));
   console.log(summarizeConsensus(Array.from(latestBlocks.values())));
 
   await updateStatus(sessionPath, {

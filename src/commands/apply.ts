@@ -1,20 +1,29 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig, ConfigError } from "../utils/config.js";
-import { initializeAdapters, createAdapter } from "../utils/adapters.js";
-import { findLatestSession, readStatus, updateStatus } from "../utils/session.js";
+import { initializeAdapters } from "../utils/adapters.js";
+import { findLatestSession, updateStatus } from "../utils/session.js";
 import { selectLeadKnight } from "../orchestrator.js";
+import {
+  parseCodeBlocks,
+  writeFilesDirect,
+  writeFilesWithConfirmation,
+} from "../utils/file-writer.js";
 import type { ConsensusBlock } from "../types.js";
 
 /**
  * The `roundtable apply` command.
  * Reads the latest session's decision and executes it via the Lead Knight.
+ * Now actually writes files to disk instead of just printing text.
+ *
+ * Modes:
+ *   --parley (default) — shows each file, asks for confirmation
+ *   --noparley — writes everything directly ("dangerous mode")
  */
-export async function applyCommand(): Promise<void> {
+export async function applyCommand(noparley = false): Promise<void> {
   const projectRoot = process.cwd();
 
   // Load config
@@ -23,7 +32,7 @@ export async function applyCommand(): Promise<void> {
     config = await loadConfig(projectRoot);
   } catch (error) {
     if (error instanceof ConfigError) {
-      console.log(chalk.red(error.message));
+      console.log(chalk.red(`\n  Well, that didn't go as planned: ${error.message}`));
       process.exit(1);
     }
     throw error;
@@ -32,29 +41,30 @@ export async function applyCommand(): Promise<void> {
   // Find latest session
   const session = await findLatestSession(projectRoot);
   if (!session) {
-    console.log(chalk.red("No sessions found. Run a discussion first."));
+    console.log(chalk.red("\n  No sessions found. The knights have nothing to execute."));
+    console.log(chalk.dim('  Run `roundtable discuss "topic"` first.\n'));
     process.exit(1);
   }
 
   // Check status
   const status = session.status;
   if (!status?.consensus_reached) {
-    console.log(chalk.yellow("Latest session has no consensus. Nothing to apply."));
+    console.log(chalk.yellow("\n  No consensus in the latest session. The knights can't agree — what else is new."));
     console.log(chalk.dim(`  Session: ${session.name}`));
-    console.log(chalk.dim(`  Phase: ${status?.phase || "unknown"}`));
+    console.log(chalk.dim(`  Phase: ${status?.phase || "unknown"}\n`));
     return;
   }
 
   if (status.phase === "completed") {
-    console.log(chalk.yellow("Decision already applied."));
-    console.log(chalk.dim(`  Session: ${session.name}`));
+    console.log(chalk.yellow("\n  Already applied. The deed is done."));
+    console.log(chalk.dim(`  Session: ${session.name}\n`));
     return;
   }
 
   // Read decisions.md
   const decisionsPath = join(session.path, "decisions.md");
   if (!existsSync(decisionsPath)) {
-    console.log(chalk.red("No decisions.md found in latest session."));
+    console.log(chalk.red("\n  No decisions.md found. Consensus without a decision? Impressive."));
     process.exit(1);
   }
 
@@ -65,8 +75,9 @@ export async function applyCommand(): Promise<void> {
   let blocks: ConsensusBlock[] = [];
   if (existsSync(discussionPath)) {
     const discussion = await readFile(discussionPath, "utf-8");
-    // Extract consensus scores from discussion to determine lead knight
-    const scoreMatches = discussion.matchAll(/## Round (\d+) — (\w+)[\s\S]*?Score: (\d+)\/10/g);
+    const scoreMatches = discussion.matchAll(
+      /## Round (\d+) — (\w+)[\s\S]*?Score: (\d+)\/10/g
+    );
     for (const match of scoreMatches) {
       blocks.push({
         knight: match[2],
@@ -82,48 +93,38 @@ export async function applyCommand(): Promise<void> {
   const leadKnight = selectLeadKnight(config.knights, blocks);
 
   // Show decision summary
-  console.log(chalk.bold("\n  Decision to apply:\n"));
-  console.log(chalk.dim(`  Session: ${session.name}`));
-  console.log(chalk.dim(`  Topic: ${session.topic || "unknown"}`));
-  console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}\n`));
+  console.log(chalk.bold("\n  The council has spoken.\n"));
+  console.log(chalk.dim(`  Session:     ${session.name}`));
+  console.log(chalk.dim(`  Topic:       ${session.topic || "unknown"}`));
+  console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}`));
 
-  // Show a preview of the decision (first few lines)
-  const preview = decision.split("\n").slice(0, 15).join("\n");
-  console.log(chalk.dim(preview));
-  if (decision.split("\n").length > 15) {
-    console.log(chalk.dim("  ...(truncated)"));
-  }
-
-  // Ask for confirmation
-  console.log("");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await rl.question(
-    chalk.bold.yellow("  Apply this decision? [y/N] ")
-  );
-  rl.close();
-
-  const confirmed = answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
-  if (!confirmed) {
-    console.log(chalk.dim("  Aborted."));
-    return;
+  if (noparley) {
+    console.log(chalk.red.bold(`  Mode:        NO PARLEY`));
+    console.log(chalk.dim(`  No questions asked. Bold move.\n`));
+  } else {
+    console.log(chalk.green(`  Mode:        PARLEY`));
+    console.log(chalk.dim(`  Each file will be shown for approval.\n`));
   }
 
   // Update status to applying
   await updateStatus(session.path, { phase: "applying" });
 
   // Initialize adapters and find the lead knight's adapter
-  console.log(chalk.dim("\n  Initializing Lead Knight...\n"));
   const adapters = await initializeAdapters(config);
-
   const adapter = adapters.get(leadKnight.adapter);
+
   if (!adapter) {
-    console.log(chalk.red(`  Lead Knight "${leadKnight.name}" adapter not available.`));
-    console.log(chalk.dim("  Try installing the required CLI tool or configuring an API key."));
+    console.log(
+      chalk.red(
+        `\n  ${leadKnight.name} didn't show up. Adapter "${leadKnight.adapter}" not available.`
+      )
+    );
+    console.log(chalk.dim("  Install the required CLI tool or configure an API key."));
     await updateStatus(session.path, { phase: "consensus_reached" });
     process.exit(1);
   }
 
-  // Build execution prompt
+  // Build execution prompt with file format instructions
   const executionPrompt = [
     `You are ${leadKnight.name}, the Lead Knight chosen to execute the following decision.`,
     `Your capabilities: ${leadKnight.capabilities.join(", ")}`,
@@ -133,35 +134,85 @@ export async function applyCommand(): Promise<void> {
     decision,
     "---",
     "",
-    "Execute this decision. Write the code changes, create files, or perform the actions described.",
-    "Be precise and complete. Follow the decision exactly as agreed.",
+    "IMPORTANT — OUTPUT FORMAT:",
+    "For EACH file you create or modify, use this EXACT format:",
+    "",
+    "FILE: path/to/file.ts",
+    "```typescript",
+    "// complete file content here",
+    "```",
+    "",
+    "Rules:",
+    "- Use FILE: before every code block with the full relative path",
+    "- Give the COMPLETE file content, not just snippets or diffs",
+    "- Include ALL files needed to implement the decision",
+    "- Do not explain — just output the files",
+    "- Be precise and thorough",
   ].join("\n");
 
   // Execute
-  const spinner = ora(chalk.cyan(`  ${leadKnight.name} is executing...`)).start();
+  const spinner = ora(
+    chalk.cyan(`  ${leadKnight.name} unsheathes their keyboard...`)
+  ).start();
 
   try {
-    const timeoutMs = config.rules.timeout_per_turn_seconds * 1000 * 2; // Double timeout for execution
+    const timeoutMs = config.rules.timeout_per_turn_seconds * 1000 * 3; // Triple timeout for execution
     const result = await adapter.execute(executionPrompt, timeoutMs);
-    spinner.succeed(`  ${leadKnight.name} completed execution`);
+    spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
 
-    console.log(chalk.bold("\n  Execution result:\n"));
-    const indented = result
-      .split("\n")
-      .map((line) => `  ${line}`)
-      .join("\n");
-    console.log(indented);
+    // Parse code blocks from response
+    const files = parseCodeBlocks(result);
 
-    // Update status to completed
-    await updateStatus(session.path, { phase: "completed" });
+    if (files.length === 0) {
+      console.log(
+        chalk.yellow(
+          "\n  The knight returned... but brought no files. Just words."
+        )
+      );
+      console.log(chalk.dim("  Raw response:"));
+      const indented = result
+        .split("\n")
+        .slice(0, 30)
+        .map((line) => `  ${line}`)
+        .join("\n");
+      console.log(chalk.dim(indented));
+      if (result.split("\n").length > 30) {
+        console.log(chalk.dim("  ...(truncated)"));
+      }
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      return;
+    }
 
-    console.log(chalk.bold.green("\n  Decision applied successfully!"));
-    console.log(chalk.dim("  Review the changes before committing.\n"));
+    console.log(
+      chalk.bold(`\n  ${files.length} file(s) forged by ${leadKnight.name}:\n`)
+    );
+
+    // Write files based on mode
+    let written: number;
+    if (noparley) {
+      console.log(chalk.red("  No parley mode — writing all files directly.\n"));
+      written = await writeFilesDirect(files, projectRoot);
+    } else {
+      console.log(chalk.dim("  Let's review what the knight proposes:\n"));
+      written = await writeFilesWithConfirmation(files, projectRoot);
+    }
+
+    // Update status
+    if (written > 0) {
+      await updateStatus(session.path, { phase: "completed" });
+      console.log(
+        chalk.bold.green(`\n  ${written} file(s) written. The decision has been executed.`)
+      );
+      console.log(chalk.dim("  Review the changes before committing.\n"));
+    } else {
+      console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+    }
   } catch (error) {
-    spinner.fail(`  ${leadKnight.name} execution failed`);
+    spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.log(chalk.red(`  Error: ${errMsg}`));
-    await updateStatus(session.path, { phase: "consensus_reached" }); // Reset so user can retry
+    console.log(chalk.red(`  Well, that didn't go as planned: ${errMsg}`));
+    await updateStatus(session.path, { phase: "consensus_reached" });
     process.exit(1);
   }
 }

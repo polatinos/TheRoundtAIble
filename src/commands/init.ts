@@ -129,16 +129,17 @@ export async function initCommand(): Promise<void> {
   // Check if already initialized
   if (existsSync(roundtablePath)) {
     console.log(
-      chalk.yellow("\n  .roundtable/ already exists in this project.")
+      chalk.yellow("\n  The roundtable already exists in this project.")
     );
-    const overwrite = await confirm("  Reinitialize? (overwrites config)", false);
+    const overwrite = await confirm("  Reinitialize? This will overwrite your config.", false);
     if (!overwrite) {
-      console.log(chalk.dim("  Aborted."));
+      console.log(chalk.dim("  Wise choice. The table stands."));
       return;
     }
   }
 
-  console.log(chalk.bold("\n  TheRoundtAIble Setup Wizard\n"));
+  console.log(chalk.bold("\n  Welcome to TheRoundtAIble\n"));
+  console.log(chalk.dim("  Where no AI is King, but all serve the Code.\n"));
 
   // 1. Project name
   const dirName = projectRoot.split(/[\\/]/).pop() || "MyProject";
@@ -149,13 +150,16 @@ export async function initCommand(): Promise<void> {
 
   // 3. Detect tools
   console.log("");
-  const detectSpinner = ora("  Detecting available AI tools...").start();
+  const detectSpinner = ora("  Scouting for available knights...").start();
   const tools = await detectTools();
-  detectSpinner.succeed("  Detection complete");
+  detectSpinner.succeed("  Scouting complete");
 
   for (const tool of tools) {
-    const icon = tool.available ? chalk.green("✓") : chalk.red("✗");
-    console.log(`    ${icon} ${tool.name} (${tool.command})`);
+    const icon = tool.available ? chalk.green("  +") : chalk.red("  -");
+    const status = tool.available
+      ? chalk.green("ready for battle")
+      : chalk.dim("not found");
+    console.log(`${icon} ${chalk.bold(tool.name)} ${chalk.dim(`(${tool.command})`)} — ${status}`);
   }
 
   // 4. Let user choose which knights to enable
@@ -170,7 +174,7 @@ export async function initCommand(): Promise<void> {
 
   for (const tool of tools) {
     if (tool.available) {
-      const use = await confirm(`  Enable ${tool.name}?`, true);
+      const use = await confirm(`  Seat ${tool.name} at the table?`, true);
       if (use) {
         enabledKnights.push({
           name: tool.name,
@@ -180,7 +184,7 @@ export async function initCommand(): Promise<void> {
       }
     } else {
       const use = await confirm(
-        `  ${tool.name} not found. Add anyway (requires API key fallback)?`,
+        `  ${tool.name} is MIA. Add anyway (requires API key)?`,
         false
       );
       if (use) {
@@ -194,7 +198,7 @@ export async function initCommand(): Promise<void> {
   }
 
   if (enabledKnights.length === 0) {
-    console.log(chalk.red("\n  No knights enabled. At least one is required."));
+    console.log(chalk.red("\n  A roundtable with no knights is just a table."));
     console.log(chalk.dim("  Re-run `roundtable init` and enable at least one knight."));
     return;
   }
@@ -204,7 +208,7 @@ export async function initCommand(): Promise<void> {
 
   // 6. Create folder structure
   console.log("");
-  const structureSpinner = ora("  Creating .roundtable/ structure...").start();
+  const structureSpinner = ora("  Forging the roundtable...").start();
   await mkdir(join(roundtablePath, "sessions"), { recursive: true });
 
   await writeFile(
@@ -215,20 +219,20 @@ export async function initCommand(): Promise<void> {
 
   await writeFile(
     join(roundtablePath, "chronicle.md"),
-    "# Chronicle - TheRoundtAIble\n\nBeslissingen log van dit project.\n\n---\n\n",
+    "# Chronicle — TheRoundtAIble\n\nThe record of all decisions made at this table.\n\n---\n\n",
     "utf-8"
   );
 
-  structureSpinner.succeed("  Structure created");
+  structureSpinner.succeed("  The roundtable is forged");
 
   // 7. Summary
-  console.log(chalk.bold.green("\n  TheRoundtAIble initialized!"));
+  console.log(chalk.bold.green("\n  TheRoundtAIble is ready.\n"));
   console.log(`    Project:   ${chalk.cyan(config.project)}`);
   console.log(`    Language:  ${chalk.cyan(config.language)}`);
   console.log(`    Knights:   ${config.knights.map((k) => chalk.cyan(k.name)).join(", ")}`);
   console.log(`    Config:    ${chalk.dim(join(roundtablePath, "config.json"))}`);
   console.log(`    Chronicle: ${chalk.dim(join(roundtablePath, "chronicle.md"))}`);
   console.log(
-    chalk.dim('\n  Run `roundtable discuss "your question"` to start.\n')
+    chalk.dim('\n  The table is set. Run `roundtable discuss "your question"` to begin.\n')
   );
 }
