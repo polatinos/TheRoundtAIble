@@ -57,10 +57,10 @@
 ## Fase 4: Polish & Release
 
 - [x] Error handling + graceful failures
-- [ ] Interactieve `init` wizard
+- [x] Interactieve `init` wizard
 - [x] Mooie terminal output (chalk/ora spinners)
 - [ ] npm package publiceren
-- [ ] README.md met installatie + quick start
+- [x] README.md met installatie + quick start
 - [ ] GitHub repo aanmaken + eerste release
 
 ---
