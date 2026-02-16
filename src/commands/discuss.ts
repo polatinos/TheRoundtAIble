@@ -2,14 +2,42 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
-import type { RoundtableConfig, AdapterCliConfig } from "../types.js";
+import type { RoundtableConfig, AdapterCliConfig, AdapterApiConfig } from "../types.js";
 import { BaseAdapter } from "../adapters/base.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
+import { GeminiCliAdapter } from "../adapters/gemini-cli.js";
+import { OpenAIApiAdapter } from "../adapters/openai-api.js";
 import { runDiscussion } from "../orchestrator.js";
 
 /**
+ * Create an adapter instance for a given adapter ID.
+ */
+function createAdapter(
+  adapterId: string,
+  config: RoundtableConfig,
+  timeoutMs: number
+): BaseAdapter | null {
+  switch (adapterId) {
+    case "claude-cli": {
+      const cfg = config.adapter_config["claude-cli"] as AdapterCliConfig | undefined;
+      return new ClaudeCliAdapter(cfg?.command || "claude", timeoutMs);
+    }
+    case "gemini-cli": {
+      const cfg = config.adapter_config["gemini-cli"] as AdapterCliConfig | undefined;
+      return new GeminiCliAdapter(cfg?.command || "gemini", timeoutMs);
+    }
+    case "openai-api": {
+      const cfg = config.adapter_config["openai-api"] as AdapterApiConfig | undefined;
+      return new OpenAIApiAdapter(cfg?.model || "gpt-4o", cfg?.env_key || "OPENAI_API_KEY", timeoutMs);
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * Create adapter instances based on config.
- * Only returns adapters that are available.
+ * Tries the primary adapter first; falls back if configured and primary unavailable.
  */
 async function initializeAdapters(
   config: RoundtableConfig
@@ -18,38 +46,35 @@ async function initializeAdapters(
   const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
 
   for (const knight of config.knights) {
-    let adapter: BaseAdapter | null = null;
-
-    switch (knight.adapter) {
-      case "claude-cli": {
-        const adapterConfig = config.adapter_config["claude-cli"] as AdapterCliConfig | undefined;
-        const command = adapterConfig?.command || "claude";
-        adapter = new ClaudeCliAdapter(command, timeoutMs);
-        break;
-      }
-      // Gemini and OpenAI adapters will be added in future phases
-      case "gemini-cli":
-      case "openai-api":
-        console.log(
-          chalk.dim(`  ${knight.name}: adapter "${knight.adapter}" not yet implemented`)
-        );
-        continue;
-      default:
-        console.log(
-          chalk.yellow(`  Unknown adapter: ${knight.adapter}`)
-        );
-        continue;
+    // Try primary adapter
+    const primary = createAdapter(knight.adapter, config, timeoutMs);
+    if (!primary) {
+      console.log(chalk.yellow(`  ? ${knight.name}: unknown adapter "${knight.adapter}"`));
+      continue;
     }
 
-    if (adapter) {
-      const available = await adapter.isAvailable();
-      if (available) {
-        adapters.set(knight.adapter, adapter);
-        console.log(chalk.green(`  ✓ ${knight.name} ready`));
-      } else {
-        console.log(chalk.yellow(`  ✗ ${knight.name} not available`));
+    const primaryAvailable = await primary.isAvailable();
+    if (primaryAvailable) {
+      adapters.set(knight.adapter, primary);
+      console.log(chalk.green(`  ✓ ${knight.name} ready (${knight.adapter})`));
+      continue;
+    }
+
+    // Try fallback if configured
+    if (knight.fallback) {
+      console.log(chalk.dim(`  ${knight.name}: ${knight.adapter} unavailable, trying fallback...`));
+      const fallback = createAdapter(knight.fallback, config, timeoutMs);
+      if (fallback) {
+        const fallbackAvailable = await fallback.isAvailable();
+        if (fallbackAvailable) {
+          adapters.set(knight.adapter, fallback); // Register under primary key so orchestrator finds it
+          console.log(chalk.green(`  ✓ ${knight.name} ready (fallback: ${knight.fallback})`));
+          continue;
+        }
       }
     }
+
+    console.log(chalk.yellow(`  ✗ ${knight.name} not available`));
   }
 
   return adapters;

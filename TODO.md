@@ -37,10 +37,10 @@
 
 - [x] BaseAdapter abstracte klasse
 - [x] Claude Code CLI adapter (`claude -p`)
-- [ ] Gemini CLI adapter (`gemini -p`)
-- [ ] OpenAI API adapter (REST, API key)
+- [x] Gemini CLI adapter (`gemini -p`)
+- [x] OpenAI API adapter (REST, API key)
 - [x] Adapter auto-detectie (`which claude`, `which gemini`)
-- [ ] Fallback logica (CLI -> API)
+- [x] Fallback logica (CLI -> API)
 
 ---
 
