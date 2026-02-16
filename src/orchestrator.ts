@@ -77,14 +77,14 @@ function getThinkingMessage(knightName: string): string {
 /** Round headers with personality */
 function roundHeader(round: number, maxRounds: number): string {
   const headers = [
-    `ROUND ${round} — Let the debate begin`,
-    `ROUND ${round} — The plot thickens`,
-    `ROUND ${round} — Will they ever agree?`,
-    `ROUND ${round} — The final stand`,
-    `ROUND ${round} — Last chance for consensus`,
+    `ROUND ${round} — KNIGHTS! DRAW YOUR KEYBOARDS!`,
+    `ROUND ${round} — KNIGHTS! SPEAK NOW OR CODE SUFFERS! FOR KING AND KONG!`,
+    `ROUND ${round} — EGOS CLASH, CODE SUFFERS!`,
+    `ROUND ${round} — ONE LAST PLEA FOR SANITY!`,
+    `ROUND ${round} — SPEAK NOW OR FOREVER HOLD YOUR MERGE CONFLICTS!`,
   ];
   const idx = Math.min(round - 1, headers.length - 1);
-  return round <= headers.length ? headers[idx] : `ROUND ${round}/${maxRounds}`;
+  return round <= headers.length ? headers[idx] : `ROUND ${round} — FOR KING AND CODE!`;
 }
 
 /**
