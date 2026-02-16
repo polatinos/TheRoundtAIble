@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "project": "MijnProject",
+  "language": "nl",
+  "knights": [
+    {
+      "name": "Claude",
+      "adapter": "claude-cli",
+      "capabilities": ["architecture", "refactoring", "logic", "debugging", "testing"],
+      "priority": 1,
+      "fallback": "claude-api"
+    },
+    {
+      "name": "Gemini",
+      "adapter": "gemini-cli",
+      "capabilities": ["docs", "ui-ux", "summarization", "review", "planning"],
+      "priority": 2,
+      "fallback": "gemini-api"
+    },
+    {
+      "name": "GPT",
+      "adapter": "openai-api",
+      "capabilities": ["communication", "content", "explanation"],
+      "priority": 3
+    }
+  ],
+  "rules": {
+    "max_rounds": 5,
+    "consensus_threshold": 9,
+    "timeout_per_turn_seconds": 120,
+    "escalate_to_user_after": 3,
+    "auto_execute": false,
+    "ignore": [".git", "node_modules", "dist", "build", ".next"]
+  },
+  "chronicle": ".roundtable/chronicle.md",
+  "adapter_config": {
+    "claude-cli": {
+      "command": "claude",
+      "args": ["-p", "{prompt}", "--print"]
+    },
+    "gemini-cli": {
+      "command": "gemini",
+      "args": ["-p", "{prompt}"]
+    },
+    "openai-api": {
+      "model": "gpt-4o",
+      "env_key": "OPENAI_API_KEY"
+    }
+  }
+}
