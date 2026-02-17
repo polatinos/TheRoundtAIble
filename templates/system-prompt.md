@@ -35,5 +35,7 @@ CHRONICLE (eerdere beslissingen van dit project):
 IMPLEMENTATION STATUS (wat al gebouwd is — stel dit niet opnieuw voor tenzij je wilt refactoren):
 {{manifest_summary}}
 
+{{decrees}}
+
 HUIDIGE DISCUSSIE:
 {{previous_rounds}}

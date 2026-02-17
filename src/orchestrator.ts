@@ -25,6 +25,7 @@ import {
 } from "./utils/session.js";
 import { appendToChronicle } from "./utils/chronicle.js";
 import { readErrorLog } from "./utils/error-log.js";
+import { readDecreeLog, getActiveDecrees, formatDecreesForPrompt } from "./utils/decree-log.js";
 
 /**
  * Select the Lead Knight based on capabilities matching the topic.
@@ -132,10 +133,15 @@ export async function runDiscussion(
   const manifest = await readManifest(projectRoot);
   const manifestSummary = getManifestSummary(manifest);
 
+  // Load decree log for rejected decisions
+  const decreeLog = await readDecreeLog(projectRoot);
+  const activeDecrees = getActiveDecrees(decreeLog);
+  const decreesContext = formatDecreesForPrompt(activeDecrees);
+
   if (context.sourceFileContents) {
-    contextSpinner.succeed(`  Context assembled (source: ${Math.round(context.sourceFileContents.length / 1024)}KB, manifest: ${manifest.features.length} features)`);
+    contextSpinner.succeed(`  Context assembled (source: ${Math.round(context.sourceFileContents.length / 1024)}KB, manifest: ${manifest.features.length} features, decrees: ${activeDecrees.length})`);
   } else {
-    contextSpinner.succeed(`  Context assembled (manifest: ${manifest.features.length} features)`);
+    contextSpinner.succeed(`  Context assembled (manifest: ${manifest.features.length} features, decrees: ${activeDecrees.length})`);
   }
 
   // Create session
@@ -174,7 +180,8 @@ export async function runDiscussion(
         topic,
         context.chronicle,
         allRounds,
-        manifestSummary
+        manifestSummary,
+        decreesContext
       );
 
       const fullPrompt = [

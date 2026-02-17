@@ -17,6 +17,7 @@ import {
 } from "../utils/file-writer.js";
 import { askParleyMode } from "../utils/decree.js";
 import { addManifestEntry, topicToFeatureId, getFeatureSummary } from "../utils/manifest.js";
+import { addDecreeEntry } from "../utils/decree-log.js";
 import { hashContent } from "../utils/hash.js";
 import type { ConsensusBlock, ManifestFeatureStatus } from "../types.js";
 import { createInterface } from "node:readline/promises";
@@ -235,6 +236,15 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     ].join("\n");
     const overridePath = join(session.path, "scope-override.md");
     await writeFileFs(overridePath, overrideLog, "utf-8");
+
+    // Log to decree log
+    await addDecreeEntry(
+      projectRoot,
+      "override_scope",
+      session.name,
+      session.topic || "unknown",
+      reason.trim()
+    );
   }
 
   // Build source context: read existing files so the knight sees current code

@@ -11,6 +11,7 @@ import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
 import { codeRedCommand } from "./commands/code-red.js";
+import { decreesCommand } from "./commands/decrees.js";
 import {
   manifestListCommand,
   manifestAddCommand,
@@ -128,6 +129,17 @@ program
   .action(async () => {
     try {
       await chronicleCommand();
+    } catch (error) {
+      handleCliError(error);
+    }
+  });
+
+program
+  .command("decrees")
+  .description("View the King's Decree Log (rejected/deferred decisions)")
+  .action(async () => {
+    try {
+      await decreesCommand();
     } catch (error) {
       handleCliError(error);
     }

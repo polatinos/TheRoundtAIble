@@ -143,6 +143,25 @@ export interface Manifest {
   features: ManifestEntry[];
 }
 
+// --- Decree Log types ---
+
+export type DecreeType = "rejected_no_apply" | "deferred" | "override_scope";
+
+export interface DecreeEntry {
+  id: string;
+  type: DecreeType;
+  session: string;
+  topic: string;
+  reason: string;
+  revoked: boolean;
+  date: string;
+}
+
+export interface DecreeLog {
+  version: "1.0";
+  entries: DecreeEntry[];
+}
+
 // --- File change types ---
 
 export interface FileChange {

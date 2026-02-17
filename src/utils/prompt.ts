@@ -85,7 +85,8 @@ export async function buildSystemPrompt(
   topic: string,
   chronicle: string,
   previousRounds: RoundEntry[],
-  manifestSummary?: string
+  manifestSummary?: string,
+  decreesContext?: string
 ): Promise<string> {
   const template = await loadTemplate();
   const personality =
@@ -99,6 +100,7 @@ export async function buildSystemPrompt(
     .replace("{{personality}}", personality)
     .replace("{{chronicle_content}}", chronicle || "(Geen eerdere beslissingen.)")
     .replace("{{manifest_summary}}", manifestSummary || "No implementation history yet.")
+    .replace("{{decrees}}", decreesContext || "")
     .replace("{{previous_rounds}}", formatPreviousRounds(previousRounds));
 }
 

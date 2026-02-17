@@ -5,6 +5,7 @@ import { initializeAdapters } from "../utils/adapters.js";
 import { runDiscussion } from "../orchestrator.js";
 import { writeDecisions, updateStatus } from "../utils/session.js";
 import { askKingsDecree, askParleyMode } from "../utils/decree.js";
+import { addDecreeEntry } from "../utils/decree-log.js";
 import { applyCommand } from "./apply.js";
 import type { SessionResult, RoundEntry } from "../types.js";
 
@@ -99,6 +100,8 @@ export async function discussCommand(topic: string): Promise<void> {
  * Consensus reached — ask the King if they want to apply now.
  */
 async function handleConsensus(result: SessionResult): Promise<void> {
+  const projectRoot = process.cwd();
+
   console.log(chalk.bold.green("  A miracle has occurred. The knights actually agree."));
   console.log(chalk.dim(`  Rounds: ${result.rounds}`));
   console.log(chalk.dim(`  Session: ${result.sessionPath}`));
@@ -109,10 +112,18 @@ async function handleConsensus(result: SessionResult): Promise<void> {
     const noparley = await askParleyMode();
     await applyCommand(noparley);
   } else if (decree === "self") {
+    // King will implement themselves — log as rejected_no_apply
+    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
+    const topic = result.decision?.slice(0, 80) || "unknown";
+    await addDecreeEntry(projectRoot, "rejected_no_apply", sessionName, topic, "King chose to implement manually");
     console.log(chalk.bold("\n  Very well. The plan has been recorded."));
     console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
     console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
   } else {
+    // Deferred — will decide later
+    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
+    const topic = result.decision?.slice(0, 80) || "unknown";
+    await addDecreeEntry(projectRoot, "deferred", sessionName, topic, "Court adjourned — decide later");
     console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
   }
 }
@@ -124,6 +135,8 @@ async function handleNoConsensus(
   result: SessionResult,
   topic: string
 ): Promise<void> {
+  const projectRoot = process.cwd();
+
   console.log(chalk.bold.yellow("  The knights have agreed to disagree. As usual."));
   console.log(chalk.dim(`  Rounds: ${result.rounds}`));
   console.log(chalk.dim(`  Session: ${result.sessionPath}`));
@@ -223,10 +236,14 @@ async function handleNoConsensus(
     const noparley = await askParleyMode();
     await applyCommand(noparley);
   } else if (decree === "self") {
+    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
+    await addDecreeEntry(projectRoot, "rejected_no_apply", sessionName, topic, `King chose ${chosen.knight}'s plan, will implement manually`);
     console.log(chalk.bold("\n  Very well. The plan has been recorded."));
     console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
     console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
   } else {
+    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
+    await addDecreeEntry(projectRoot, "deferred", sessionName, topic, `King chose ${chosen.knight}'s plan, court adjourned`);
     console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
   }
 }
