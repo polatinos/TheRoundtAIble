@@ -89,7 +89,12 @@ roundtable code-red "login page crashes on submit"
 | `roundtable summon` | Start a discussion based on your `git diff` |
 | `roundtable apply` | Execute the consensus decision (Lead Knight writes code) |
 | `roundtable apply --noparley` | Execute without file-by-file review (dangerous) |
+| `roundtable apply --override-scope` | Bypass file scope enforcement (requires reason) |
 | `roundtable code-red "symptoms"` | Emergency diagnostic mode — knights become doctors |
+| `roundtable manifest list` | Show all tracked features in the implementation manifest |
+| `roundtable manifest check` | Check manifest for stale entries (deleted files) |
+| `roundtable manifest add <id> --files` | Manually add a feature to the manifest |
+| `roundtable manifest deprecate <id>` | Mark a feature as deprecated |
 | `roundtable status` | Show current session status |
 | `roundtable list` | List all discussion sessions |
 | `roundtable chronicle` | View the decision log |
@@ -152,6 +157,37 @@ When they agree on a diagnosis, you choose: **Fix now**, **Report only**, or **L
 
 All diagnoses are tracked in `.roundtable/error-log.md` with CR-XXX IDs.
 
+## Implementation Manifest
+
+TheRoundtAIble tracks what has been built. After each `roundtable apply`, the manifest is automatically updated so knights don't re-propose features that already exist.
+
+```bash
+# See what's been built
+roundtable manifest list
+
+  [+] auth-refactor — JWT with NextAuth wrapper
+      Status: implemented | Knight: Claude | 2026-02-17
+      Files: src/lib/auth.ts, src/middleware.ts
+
+  [~] user-dashboard — Dashboard component with charts
+      Status: partial | Knight: Gemini | 2026-02-17
+      Files: src/components/Dashboard.tsx
+      Skipped: src/components/Charts.tsx
+
+# Check for stale entries (files that no longer exist)
+roundtable manifest check
+```
+
+Knights see the manifest in their system prompt, preventing duplicate proposals.
+
+### Scoped Apply
+
+When knights reach consensus (score >= 9), they declare which files they intend to modify. The `apply` command enforces this scope:
+
+- Files outside the agreed scope are **blocked** (shown in red)
+- Use `--override-scope` to bypass (requires typing "YES" + a reason, logged for audit)
+- Old sessions without scope data work normally (no enforcement)
+
 ## Project structure
 
 ```
@@ -159,6 +195,7 @@ your-project/
   .roundtable/
     config.json          # Which knights, rules, capabilities
     chronicle.md         # Decision log (persistent memory)
+    manifest.json        # Implementation manifest (what's been built)
     error-log.md         # Code-red diagnostic log
     sessions/
       2026-02-16-auth-refactor/
@@ -181,6 +218,8 @@ See [architecture-docs.md](architecture-docs.md) for the full technical architec
 - [x] Code-Red emergency diagnostic mode
 - [x] Git-diff based discussions (`summon`)
 - [x] Chronicle (persistent decision memory)
+- [x] Implementation Manifest (tracks what's been built)
+- [x] Scoped Apply (knights declare files, apply enforces scope)
 - [ ] VS Code extension
 - [ ] Web dashboard for session visualization
 - [ ] More adapters (DeepSeek, Llama, Mistral)
