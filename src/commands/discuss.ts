@@ -4,34 +4,12 @@ import { loadConfig, ConfigError } from "../utils/config.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { runDiscussion } from "../orchestrator.js";
 import { writeDecisions, updateStatus } from "../utils/session.js";
+import { askKingsDecree, askParleyMode } from "../utils/decree.js";
 import { applyCommand } from "./apply.js";
 import type { SessionResult, RoundEntry } from "../types.js";
 
 const rl = () =>
   createInterface({ input: process.stdin, output: process.stdout });
-
-/**
- * Ask the user whether to use parley (review each file) or no parley (write all).
- * Returns true for noparley mode.
- */
-async function askParleyMode(): Promise<boolean> {
-  console.log(chalk.bold("\n  How shall the code be written?\n"));
-  console.log(`  ${chalk.bold("1.")} ${chalk.green("Parley")} — review each file before writing`);
-  console.log(`  ${chalk.bold("2.")} ${chalk.red("No Parley")} — write everything, no questions asked\n`);
-
-  const r = rl();
-  const answer = await r.question(chalk.bold.yellow("  Your call, Your Majesty? [1/2] "));
-  r.close();
-
-  const choice = answer.trim();
-  if (choice === "2") {
-    console.log(chalk.red("\n  No Parley it is. Bold move.\n"));
-    return true;
-  }
-
-  console.log(chalk.green("\n  Parley mode. Wise choice.\n"));
-  return false;
-}
 
 /**
  * The `roundtable discuss` command.
@@ -100,24 +78,17 @@ async function handleConsensus(result: SessionResult): Promise<void> {
   console.log(chalk.dim(`  Rounds: ${result.rounds}`));
   console.log(chalk.dim(`  Session: ${result.sessionPath}`));
 
-  console.log("");
-  const r = rl();
-  const answer = await r.question(
-    chalk.bold.yellow("  Shall we forge this into code, Your Majesty? [Y/n] ")
-  );
-  r.close();
+  const decree = await askKingsDecree();
 
-  const confirmed =
-    answer.trim() === "" ||
-    answer.trim().toLowerCase() === "y" ||
-    answer.trim().toLowerCase() === "yes" ||
-    answer.trim().toLowerCase() === "ja";
-
-  if (confirmed) {
+  if (decree === "knights") {
     const noparley = await askParleyMode();
     await applyCommand(noparley);
+  } else if (decree === "self") {
+    console.log(chalk.bold("\n  Very well. The plan has been recorded."));
+    console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
+    console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
   } else {
-    console.log(chalk.dim('  The decision awaits. Run `roundtable apply` when ready.'));
+    console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
   }
 }
 
@@ -204,9 +175,18 @@ async function handleNoConsensus(
     consensus_reached: true,
   });
 
-  // Apply immediately
-  const noparley = await askParleyMode();
-  await applyCommand(noparley);
+  const decree = await askKingsDecree();
+
+  if (decree === "knights") {
+    const noparley = await askParleyMode();
+    await applyCommand(noparley);
+  } else if (decree === "self") {
+    console.log(chalk.bold("\n  Very well. The plan has been recorded."));
+    console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
+    console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
+  } else {
+    console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
+  }
 }
 
 interface KnightProposal {

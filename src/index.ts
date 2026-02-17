@@ -9,6 +9,7 @@ import { summonCommand } from "./commands/summon.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
+import { codeRedCommand } from "./commands/code-red.js";
 
 const program = new Command();
 
@@ -100,6 +101,18 @@ program
       await chronicleCommand();
     } catch (error) {
       console.error(chalk.red("The chronicles are... unreadable:"), error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("code-red <symptoms>")
+  .description("Emergency diagnostic mode — knights become doctors")
+  .action(async (symptoms: string) => {
+    try {
+      await codeRedCommand(symptoms);
+    } catch (error) {
+      console.error(chalk.red("The patient flatlined:"), error);
       process.exit(1);
     }
   });

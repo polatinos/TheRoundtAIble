@@ -46,15 +46,58 @@ export interface ConsensusBlock {
   proposal?: string;
 }
 
+export interface DiagnosticBlock {
+  knight: string;
+  round: number;
+  confidence_score: number;
+  root_cause_key: string;
+  evidence: string[];
+  rules_out: string[];
+  confirms: string[];
+  file_requests: string[];
+  next_test: string;
+}
+
+export interface DiagnosisResult {
+  sessionPath: string;
+  converged: boolean;
+  rootCauseKey: string | null;
+  rootCause: string | null;
+  codeRedId: string;
+  rounds: number;
+  allRounds: RoundEntry[];
+}
+
+export interface ErrorLogEntry {
+  id: string;
+  symptoms: string;
+  rootCause: string | null;
+  triedAndFailed: string[];
+  status: "OPEN" | "RESOLVED" | "PARKED";
+  date: string;
+}
+
+export type SessionMode = "discussion" | "diagnosis";
+
 export interface RoundEntry {
   knight: string;
   round: number;
   response: string;
   consensus: ConsensusBlock | null;
+  diagnostic?: DiagnosticBlock | null;
   timestamp: string;
 }
 
-export type SessionPhase = "discussing" | "consensus_reached" | "escalated" | "applying" | "completed";
+export type SessionPhase =
+  | "discussing"
+  | "consensus_reached"
+  | "escalated"
+  | "applying"
+  | "completed"
+  | "triaging"
+  | "diagnosing"
+  | "diagnosis_converged"
+  | "diagnosis_parked";
 
 export interface SessionStatus {
   phase: SessionPhase;

@@ -1,16 +1,21 @@
 import chalk from "chalk";
 import ora from "ora";
+import { readFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, resolve, relative, normalize } from "node:path";
 import type {
   RoundtableConfig,
   KnightConfig,
   RoundEntry,
   ConsensusBlock,
+  DiagnosticBlock,
+  DiagnosisResult,
   SessionResult,
 } from "./types.js";
 import { BaseAdapter, classifyError, AdapterError } from "./adapters/base.js";
-import { checkConsensus, summarizeConsensus } from "./consensus.js";
-import { buildSystemPrompt } from "./utils/prompt.js";
-import { buildContext } from "./utils/context.js";
+import { checkConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence } from "./consensus.js";
+import { buildSystemPrompt, buildDiagnosticPrompt } from "./utils/prompt.js";
+import { buildContext, getProjectFiles } from "./utils/context.js";
 import {
   createSession,
   writeDiscussion,
@@ -18,6 +23,7 @@ import {
   updateStatus,
 } from "./utils/session.js";
 import { appendToChronicle } from "./utils/chronicle.js";
+import { readErrorLog } from "./utils/error-log.js";
 
 /**
  * Select the Lead Knight based on capabilities matching the topic.
@@ -322,6 +328,444 @@ export async function runDiscussion(
     rounds: max_rounds,
     decision: null,
     blocks: Array.from(latestBlocks.values()),
+    allRounds,
+  };
+}
+
+// --- Diagnostic orchestration for code-red mode ---
+
+/** Thinking messages per knight in diagnostic mode */
+const DIAGNOSTIC_THINKING: Record<string, string[]> = {
+  Claude: [
+    "examines the patient's vitals...",
+    "reviews the pathology report...",
+    "checks for edge cases in the bloodwork...",
+    "mutters about insufficient test coverage...",
+  ],
+  Gemini: [
+    "looks at the bigger picture...",
+    "checks the system interactions...",
+    "orders a full body scan...",
+    "considers environmental factors...",
+  ],
+  GPT: [
+    "checks the pulse...",
+    "reaches for the defibrillator...",
+    "wants to stabilize first...",
+    "skims the chart impatiently...",
+  ],
+};
+
+function getDiagnosticThinking(knightName: string): string {
+  const messages = DIAGNOSTIC_THINKING[knightName] || [
+    "is diagnosing...",
+    "examines the symptoms...",
+  ];
+  return messages[Math.floor(Math.random() * messages.length)];
+}
+
+/** Diagnostic round headers */
+function diagnosticRoundHeader(round: number): string {
+  const headers = [
+    `TRIAGE — INITIAL ASSESSMENT`,
+    `BLIND ROUND — INDEPENDENT DIAGNOSIS`,
+    `CONVERGENCE ROUND ${round} — COMPARING DIAGNOSES`,
+    `CONVERGENCE ROUND ${round} — NARROWING DOWN`,
+    `DEEP DIVE ROUND ${round} — NEW EVIDENCE ONLY`,
+    `FINAL ROUND ${round} — LAST CHANCE TO CONVERGE`,
+  ];
+  const idx = Math.min(round, headers.length - 1);
+  return headers[idx];
+}
+
+/**
+ * Resolve file requests from knights: read files with security checks.
+ * Paths must be workspace-relative, no "..", must not match ignore patterns.
+ * Supports range notation: "path/to/file.ts:10-50"
+ */
+export async function resolveFileRequests(
+  fileRequests: string[],
+  projectRoot: string,
+  ignorePatterns: string[]
+): Promise<string> {
+  const results: string[] = [];
+
+  for (const req of fileRequests.slice(0, 4)) {
+    // Parse optional line range
+    const rangeMatch = req.match(/^(.+?):(\d+)-(\d+)$/);
+    const filePath = rangeMatch ? rangeMatch[1] : req;
+    const startLine = rangeMatch ? parseInt(rangeMatch[2]) : undefined;
+    const endLine = rangeMatch ? parseInt(rangeMatch[3]) : undefined;
+
+    // Security: normalize and check
+    const normalized = normalize(filePath).replace(/\\/g, "/");
+    if (normalized.includes("..") || normalized.startsWith("/")) {
+      results.push(`[DENIED] ${req} — path traversal not allowed`);
+      continue;
+    }
+
+    // Check ignore patterns
+    const shouldIgnore = ignorePatterns.some(
+      (pattern) =>
+        normalized.startsWith(pattern) ||
+        normalized.includes(`/${pattern}/`)
+    );
+    if (shouldIgnore) {
+      results.push(`[DENIED] ${req} — matches ignore pattern`);
+      continue;
+    }
+
+    const fullPath = join(projectRoot, normalized);
+    if (!existsSync(fullPath)) {
+      results.push(`[NOT FOUND] ${req}`);
+      continue;
+    }
+
+    try {
+      const content = await readFile(fullPath, "utf-8");
+      const lines = content.split("\n");
+
+      let excerpt: string;
+      if (startLine !== undefined && endLine !== undefined) {
+        const start = Math.max(0, startLine - 1);
+        const end = Math.min(lines.length, endLine);
+        excerpt = lines.slice(start, end).join("\n");
+      } else {
+        // Limit to 200 lines
+        excerpt = lines.slice(0, 200).join("\n");
+        if (lines.length > 200) {
+          excerpt += `\n...(${lines.length - 200} more lines)`;
+        }
+      }
+
+      results.push(`### ${req}\n\`\`\`\n${excerpt}\n\`\`\``);
+    } catch {
+      results.push(`[ERROR] ${req} — could not read file`);
+    }
+  }
+
+  return results.join("\n\n");
+}
+
+/**
+ * Check if a knight's diagnostic round passes the progress gate (rounds 5-6).
+ * Must have: new evidence OR rules_out OR file_requests OR confidence +2.
+ */
+export function passesProgressGate(
+  current: DiagnosticBlock,
+  previousByKnight: DiagnosticBlock[]
+): boolean {
+  if (previousByKnight.length === 0) return true;
+  const last = previousByKnight[previousByKnight.length - 1];
+
+  // New evidence?
+  const newEvidence = current.evidence.some((e) => !last.evidence.includes(e));
+  if (newEvidence) return true;
+
+  // New rules_out?
+  const newRulesOut = current.rules_out.some((r) => !last.rules_out.includes(r));
+  if (newRulesOut) return true;
+
+  // New file requests?
+  if (current.file_requests.length > 0) return true;
+
+  // Confidence jump >= 2?
+  if (current.confidence_score - last.confidence_score >= 2) return true;
+
+  return false;
+}
+
+/**
+ * Read source files from the codebase for initial context (optional).
+ * Max 50k chars, 30 files.
+ */
+export async function readSourceFiles(
+  projectRoot: string,
+  ignorePatterns: string[]
+): Promise<string> {
+  const files = await getProjectFiles(projectRoot, ignorePatterns);
+
+  // Filter to source files
+  const sourceExts = [".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".json"];
+  const sourceFiles = files
+    .filter((f) => sourceExts.some((ext) => f.endsWith(ext)))
+    .slice(0, 30);
+
+  const contents: string[] = [];
+  let totalChars = 0;
+  const MAX_CHARS = 50000;
+
+  for (const file of sourceFiles) {
+    if (totalChars >= MAX_CHARS) break;
+
+    try {
+      const content = await readFile(join(projectRoot, file), "utf-8");
+      const truncated = content.slice(0, Math.min(content.length, MAX_CHARS - totalChars));
+      contents.push(`### ${file}\n\`\`\`\n${truncated}\n\`\`\``);
+      totalChars += truncated.length;
+    } catch {
+      // Skip unreadable
+    }
+  }
+
+  return contents.join("\n\n");
+}
+
+/**
+ * Run a full diagnostic session between knights (code-red mode).
+ */
+export async function runDiagnosis(
+  symptoms: string,
+  config: RoundtableConfig,
+  adapters: Map<string, BaseAdapter>,
+  projectRoot: string,
+  readCodebase: boolean
+): Promise<DiagnosisResult> {
+  const maxRounds = config.rules.max_rounds + 1; // +1 for triage round (round 0)
+
+  // Create session
+  const sessionPath = await createSession(projectRoot, `CODE-RED: ${symptoms}`);
+  console.log(chalk.dim(`  Session: ${sessionPath}`));
+
+  // Read error log for triage context
+  const errorLog = await readErrorLog(projectRoot);
+  const errorLogContext = errorLog.length > 0
+    ? errorLog.map((e) => `- ${e.id}: ${e.symptoms} [${e.status}]`).join("\n")
+    : "";
+
+  // Optionally read codebase
+  let codebaseContext = "";
+  if (readCodebase) {
+    const codeSpinner = ora("  Reading the patient's full medical history (codebase)...").start();
+    codebaseContext = await readSourceFiles(projectRoot, config.rules.ignore);
+    codeSpinner.succeed(`  Codebase loaded (${Math.round(codebaseContext.length / 1024)}KB)`);
+  }
+
+  // Sort knights by priority
+  const sortedKnights = [...config.knights].sort((a, b) => a.priority - b.priority);
+
+  const allRounds: RoundEntry[] = [];
+  const latestDiagnostics: Map<string, DiagnosticBlock> = new Map();
+  const knightFailures: Map<string, number> = new Map();
+  let resolvedFiles = codebaseContext; // Start with optional codebase context
+
+  for (let round = 0; round < maxRounds; round++) {
+    console.log(chalk.bold.red(`\n  ${diagnosticRoundHeader(round)}\n`));
+
+    for (const knight of sortedKnights) {
+      // Knight health: 2+ parse failures → excluded
+      const failures = knightFailures.get(knight.name) || 0;
+      if (failures >= 2) {
+        console.log(chalk.dim(`  Dr. ${knight.name} has been removed from the operating room. (${failures} parse failures)`));
+        continue;
+      }
+
+      const adapter = adapters.get(knight.adapter);
+      if (!adapter) {
+        console.log(chalk.yellow(`  Dr. ${knight.name} is not on call today.`));
+        continue;
+      }
+
+      // Progress gate for rounds 5+
+      if (round >= 5) {
+        const previousByKnight = allRounds
+          .filter((r) => r.knight === knight.name && r.diagnostic)
+          .map((r) => r.diagnostic!);
+        const lastDiag = latestDiagnostics.get(knight.name);
+        if (lastDiag && !passesProgressGate(lastDiag, previousByKnight.slice(0, -1))) {
+          console.log(chalk.dim(`  Dr. ${knight.name} has nothing new to add. Sitting out.`));
+          continue;
+        }
+      }
+
+      await updateStatus(sessionPath, {
+        phase: round === 0 ? "triaging" : "diagnosing",
+        current_knight: knight.name,
+        round,
+      });
+
+      // Build diagnostic prompt
+      const prompt = await buildDiagnosticPrompt(
+        knight,
+        config.knights,
+        symptoms,
+        round,
+        allRounds,
+        errorLogContext,
+        resolvedFiles
+      );
+
+      // Knight colors
+      const knightColors: Record<string, (text: string) => string> = {
+        Claude: chalk.hex("#D97706"),
+        Gemini: chalk.hex("#3B82F6"),
+        GPT: chalk.hex("#10B981"),
+      };
+      const knightColor = knightColors[knight.name] || chalk.white;
+      const divider = chalk.red("─".repeat(50));
+
+      const thinkMsg = getDiagnosticThinking(knight.name);
+      const spinner = ora(knightColor(`  Dr. ${knight.name} ${thinkMsg}`)).start();
+
+      try {
+        const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
+        const response = await adapter.execute(prompt, timeoutMs);
+        spinner.stop();
+
+        // Parse diagnostic block
+        const diagnostic = parseDiagnosticFromResponse(response, knight.name, round);
+
+        const entry: RoundEntry = {
+          knight: knight.name,
+          round,
+          response,
+          consensus: null,
+          diagnostic,
+          timestamp: new Date().toISOString(),
+        };
+
+        allRounds.push(entry);
+
+        // Display
+        console.log(divider);
+        console.log(chalk.red(`  Dr. ${knight.name}`) + chalk.dim(` (Round ${round})`));
+        console.log(divider);
+
+        const displayResponse = response
+          .replace(/```json[\s\S]*?```/g, "")
+          .replace(/\{[^{}]*"confidence_score"[\s\S]*?\}/g, "")
+          .trim();
+
+        const indented = displayResponse
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n");
+        console.log(chalk.white(indented));
+
+        if (diagnostic) {
+          latestDiagnostics.set(knight.name, diagnostic);
+          const score = diagnostic.confidence_score;
+          const filled = "\u2588".repeat(score);
+          const empty = "\u2591".repeat(10 - score);
+          const scoreColor = score >= 8 ? chalk.green : score >= 5 ? chalk.yellow : chalk.red;
+
+          console.log("");
+          console.log(
+            `  ${chalk.red("Dr. " + knight.name)} confidence: ${scoreColor(`${filled}${empty} ${score}/10`)}`
+          );
+          console.log(chalk.dim(`  Root cause: ${diagnostic.root_cause_key}`));
+          if (diagnostic.evidence.length > 0) {
+            console.log(chalk.dim(`  Evidence: ${diagnostic.evidence.join(", ")}`));
+          }
+          if (diagnostic.rules_out.length > 0) {
+            console.log(chalk.dim(`  Rules out: ${diagnostic.rules_out.join(", ")}`));
+          }
+
+          // Resolve file requests for next round
+          if (diagnostic.file_requests.length > 0) {
+            console.log(chalk.dim(`  Requesting files: ${diagnostic.file_requests.join(", ")}`));
+            const newFiles = await resolveFileRequests(
+              diagnostic.file_requests,
+              projectRoot,
+              config.rules.ignore
+            );
+            if (newFiles) {
+              resolvedFiles += "\n\n" + newFiles;
+            }
+          }
+        } else {
+          console.log(chalk.yellow(`\n  (no diagnostic block found — Dr. ${knight.name} forgot the protocol)`));
+          knightFailures.set(knight.name, failures + 1);
+        }
+
+        console.log("");
+      } catch (error) {
+        spinner.fail(`  Dr. ${knight.name} collapsed in the OR`);
+        const classified = classifyError(error, knight.name);
+        console.log(chalk.red(`  Error (${classified.kind}): ${classified.message}`));
+      }
+    }
+
+    // Write discussion so far
+    await writeDiscussion(sessionPath, allRounds);
+
+    // Check diagnostic convergence
+    const currentDiags = Array.from(latestDiagnostics.values());
+    const { converged, rootCauseKey } = checkDiagnosticConvergence(currentDiags);
+
+    if (converged && rootCauseKey) {
+      console.log(chalk.bold.green("\n  DIAGNOSIS CONVERGED. The doctors agree."));
+      console.log(chalk.green(`  Root cause: ${rootCauseKey}`));
+
+      // Get the best description from the highest confidence knight
+      const bestDiag = currentDiags
+        .filter((d) => d.root_cause_key === rootCauseKey || d.confidence_score >= 8)
+        .sort((a, b) => b.confidence_score - a.confidence_score)[0];
+
+      const rootCauseDescription = allRounds
+        .filter((r) => r.knight === bestDiag?.knight)
+        .pop()?.response || "No detailed description available.";
+
+      await writeDecisions(sessionPath, `CODE-RED: ${symptoms}`, rootCauseDescription, allRounds);
+      await updateStatus(sessionPath, {
+        phase: "diagnosis_converged",
+        consensus_reached: true,
+        round,
+      });
+
+      return {
+        sessionPath,
+        converged: true,
+        rootCauseKey,
+        rootCause: rootCauseDescription,
+        codeRedId: "", // Will be set by the command
+        rounds: round + 1,
+        allRounds,
+      };
+    }
+
+    // Show current state
+    if (currentDiags.length > 0 && round < maxRounds - 1) {
+      console.log(chalk.dim("\n  Current diagnoses:"));
+      for (const d of currentDiags) {
+        const scoreColor = d.confidence_score >= 8 ? chalk.green : d.confidence_score >= 5 ? chalk.yellow : chalk.red;
+        console.log(
+          chalk.dim(`    Dr. ${d.knight}: `) +
+          scoreColor(`${d.root_cause_key} (${d.confidence_score}/10)`)
+        );
+      }
+    }
+  }
+
+  // Max rounds reached without convergence
+  console.log(chalk.bold.yellow("\n  DIAGNOSIS INCONCLUSIVE. The doctors could not agree."));
+
+  // Show suspects
+  const finalDiags = Array.from(latestDiagnostics.values());
+  if (finalDiags.length > 0) {
+    console.log(chalk.yellow("\n  Suspects:"));
+    for (const d of finalDiags.sort((a, b) => b.confidence_score - a.confidence_score)) {
+      const scoreColor = d.confidence_score >= 8 ? chalk.green : d.confidence_score >= 5 ? chalk.yellow : chalk.red;
+      console.log(
+        `    Dr. ${d.knight}: ` +
+        scoreColor(`${d.root_cause_key} (${d.confidence_score}/10)`)
+      );
+    }
+  }
+
+  await updateStatus(sessionPath, {
+    phase: "diagnosis_parked",
+    consensus_reached: false,
+    round: maxRounds,
+  });
+
+  return {
+    sessionPath,
+    converged: false,
+    rootCauseKey: finalDiags[0]?.root_cause_key || null,
+    rootCause: null,
+    codeRedId: "",
+    rounds: maxRounds,
     allRounds,
   };
 }

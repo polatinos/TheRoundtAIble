@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig, ConfigError } from "../utils/config.js";
@@ -13,33 +12,8 @@ import {
   writeFilesDirect,
   writeFilesWithConfirmation,
 } from "../utils/file-writer.js";
+import { askParleyMode } from "../utils/decree.js";
 import type { ConsensusBlock } from "../types.js";
-
-const rl = () =>
-  createInterface({ input: process.stdin, output: process.stdout });
-
-/**
- * Ask the user whether to use parley (review each file) or no parley (write all).
- * Returns true for noparley mode.
- */
-async function askParleyMode(): Promise<boolean> {
-  console.log(chalk.bold("  How shall the code be written?\n"));
-  console.log(`  ${chalk.bold("1.")} ${chalk.green("Parley")} — review each file before writing`);
-  console.log(`  ${chalk.bold("2.")} ${chalk.red("No Parley")} — write everything, no questions asked\n`);
-
-  const r = rl();
-  const answer = await r.question(chalk.bold.yellow("  Your call, Your Majesty? [1/2] "));
-  r.close();
-
-  const choice = answer.trim();
-  if (choice === "2") {
-    console.log(chalk.red("\n  No Parley it is. Bold move.\n"));
-    return true;
-  }
-
-  console.log(chalk.green("\n  Parley mode. Wise choice.\n"));
-  return false;
-}
 
 /**
  * The `roundtable apply` command.
