@@ -1,4 +1,5 @@
 import { BaseAdapter } from "./base.js";
+import { classifyError } from "../utils/errors.js";
 
 export class OpenAIApiAdapter extends BaseAdapter {
   readonly name = "GPT";
@@ -20,7 +21,10 @@ export class OpenAIApiAdapter extends BaseAdapter {
 
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     if (!this.apiKey) {
-      throw new Error("OpenAI API key not set. Set the OPENAI_API_KEY environment variable.");
+      throw classifyError(
+        new Error("OpenAI API key not set. Set the OPENAI_API_KEY environment variable."),
+        this.name
+      );
     }
 
     const timeout = timeoutMs ?? this.defaultTimeout;
@@ -57,6 +61,8 @@ export class OpenAIApiAdapter extends BaseAdapter {
       }
 
       return content;
+    } catch (error) {
+      throw classifyError(error, this.name);
     } finally {
       clearTimeout(timer);
     }

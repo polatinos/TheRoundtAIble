@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
-import { loadConfig, ConfigError } from "../utils/config.js";
+import { loadConfig } from "../utils/config.js";
+import { ConfigError, SessionError, AdapterError as AdapterErr } from "../utils/errors.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { findLatestSession, updateStatus } from "../utils/session.js";
 import { selectLeadKnight } from "../orchestrator.js";
@@ -31,24 +32,15 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   let noparley = initialNoparley;
   const projectRoot = process.cwd();
 
-  // Load config
-  let config;
-  try {
-    config = await loadConfig(projectRoot);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      console.log(chalk.red(`\n  Well, that didn't go as planned: ${error.message}`));
-      process.exit(1);
-    }
-    throw error;
-  }
+  // Load config — ConfigError propagates to index.ts
+  const config = await loadConfig(projectRoot);
 
   // Find latest session
   const session = await findLatestSession(projectRoot);
   if (!session) {
-    console.log(chalk.red("\n  No sessions found. The knights have nothing to execute."));
-    console.log(chalk.dim('  Run `roundtable discuss "topic"` first.\n'));
-    process.exit(1);
+    throw new SessionError("No sessions found. The knights have nothing to execute.", {
+      hint: 'Run `roundtable discuss "topic"` first.',
+    });
   }
 
   // Check status
@@ -69,8 +61,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   // Read decisions.md
   const decisionsPath = join(session.path, "decisions.md");
   if (!existsSync(decisionsPath)) {
-    console.log(chalk.red("\n  No decisions.md found. Consensus without a decision? Impressive."));
-    process.exit(1);
+    throw new SessionError("No decisions.md found. Consensus without a decision? Impressive.", {
+      hint: `Check session: ${session.name}`,
+    });
   }
 
   const decision = await readFile(decisionsPath, "utf-8");
@@ -124,14 +117,11 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   const adapter = adapters.get(leadKnight.adapter);
 
   if (!adapter) {
-    console.log(
-      chalk.red(
-        `\n  ${leadKnight.name} didn't show up. Adapter "${leadKnight.adapter}" not available.`
-      )
-    );
-    console.log(chalk.dim("  Install the required CLI tool or configure an API key."));
     await updateStatus(session.path, { phase: "consensus_reached" });
-    process.exit(1);
+    throw new AdapterErr(leadKnight.adapter,
+      `${leadKnight.name} didn't show up. Adapter "${leadKnight.adapter}" not available.`,
+      { hint: "Install the required CLI tool or configure an API key." }
+    );
   }
 
   // Read allowed_files from session status for scope enforcement
@@ -326,9 +316,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     }
   } catch (error) {
     spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.log(chalk.red(`  Well, that didn't go as planned: ${errMsg}`));
     await updateStatus(session.path, { phase: "consensus_reached" });
-    process.exit(1);
+    throw error; // Propagate to central handler in index.ts
   }
 }

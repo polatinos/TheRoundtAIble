@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import { BaseAdapter } from "./base.js";
+import { classifyError } from "../utils/errors.js";
 
 export class OpenAICliAdapter extends BaseAdapter {
   readonly name = "GPT";
@@ -27,21 +28,25 @@ export class OpenAICliAdapter extends BaseAdapter {
 
     // Codex docs: "If not provided as an argument (or if `-` is used),
     // instructions are read from stdin"
-    const result = await execa(
-      this.command,
-      ["exec", "-", "--sandbox", "read-only", "-o", "-"],
-      {
-        input: prompt,
-        timeout,
-        reject: false,
+    try {
+      const result = await execa(
+        this.command,
+        ["exec", "-", "--sandbox", "read-only", "-o", "-"],
+        {
+          input: prompt,
+          timeout,
+          reject: false,
+        }
+      );
+
+      if (result.exitCode !== 0) {
+        const errorMsg = result.stderr || result.stdout || "Unknown error";
+        throw new Error(`Codex CLI failed (exit ${result.exitCode}): ${errorMsg}`);
       }
-    );
 
-    if (result.exitCode !== 0) {
-      const errorMsg = result.stderr || result.stdout || "Unknown error";
-      throw new Error(`Codex CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      return result.stdout;
+    } catch (error) {
+      throw classifyError(error, this.name);
     }
-
-    return result.stdout;
   }
 }

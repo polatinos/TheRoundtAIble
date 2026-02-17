@@ -17,9 +17,33 @@ import {
   manifestDeprecateCommand,
   manifestCheckCommand,
 } from "./commands/manifest.js";
+import { RoundtableError, formatError, getExitCode } from "./utils/errors.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
+
+/**
+ * Central error handler. ALL process.exit() calls live here and ONLY here.
+ * Commands throw errors; this function catches and formats them.
+ */
+function handleCliError(error: unknown): never {
+  if (error instanceof RoundtableError) {
+    console.error(chalk.red(formatError(error)));
+    process.exit(error.exitCode);
+  }
+
+  // Unknown error — dump for debugging
+  if (error instanceof Error) {
+    console.error(chalk.red(`\n  Unexpected error: ${error.message}`));
+    if (process.env.DEBUG) {
+      console.error(chalk.dim(error.stack || ""));
+    }
+  } else {
+    console.error(chalk.red(`\n  Unexpected error: ${String(error)}`));
+  }
+
+  process.exit(getExitCode(error));
+}
 
 const program = new Command();
 
@@ -37,8 +61,7 @@ program
     try {
       await initCommand();
     } catch (error) {
-      console.error(chalk.red("Well, that didn't go as planned:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -49,8 +72,7 @@ program
     try {
       await discussCommand(topic);
     } catch (error) {
-      console.error(chalk.red("The debate ended in chaos:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -61,8 +83,7 @@ program
     try {
       await statusCommand();
     } catch (error) {
-      console.error(chalk.red("Well, that didn't go as planned:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -75,8 +96,7 @@ program
     try {
       await applyCommand(options.noparley ?? false, options.overrideScope ?? false);
     } catch (error) {
-      console.error(chalk.red("The knight dropped their sword:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -87,8 +107,7 @@ program
     try {
       await summonCommand();
     } catch (error) {
-      console.error(chalk.red("The summoning ritual failed:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -99,8 +118,7 @@ program
     try {
       await listCommand();
     } catch (error) {
-      console.error(chalk.red("Well, that didn't go as planned:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -111,8 +129,7 @@ program
     try {
       await chronicleCommand();
     } catch (error) {
-      console.error(chalk.red("The chronicles are... unreadable:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -123,8 +140,7 @@ program
     try {
       await codeRedCommand(symptoms);
     } catch (error) {
-      console.error(chalk.red("The patient flatlined:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -139,8 +155,7 @@ manifestCmd
     try {
       await manifestListCommand();
     } catch (error) {
-      console.error(chalk.red("The manifest crumbled:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -152,8 +167,7 @@ manifestCmd
     try {
       await manifestAddCommand(featureId, options.files || []);
     } catch (error) {
-      console.error(chalk.red("The manifest crumbled:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -165,8 +179,7 @@ manifestCmd
     try {
       await manifestDeprecateCommand(featureId, options.replacedBy);
     } catch (error) {
-      console.error(chalk.red("The manifest crumbled:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 
@@ -177,8 +190,7 @@ manifestCmd
     try {
       await manifestCheckCommand();
     } catch (error) {
-      console.error(chalk.red("The manifest crumbled:"), error);
-      process.exit(1);
+      handleCliError(error);
     }
   });
 

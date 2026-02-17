@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import { BaseAdapter } from "./base.js";
+import { classifyError } from "../utils/errors.js";
 
 export class GeminiCliAdapter extends BaseAdapter {
   readonly name = "Gemini";
@@ -25,26 +26,25 @@ export class GeminiCliAdapter extends BaseAdapter {
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
-    // Gemini docs: "-p/--prompt appended to input on stdin (if any)"
-    // Pass prompt via stdin to avoid command line length limits.
-    // --approval-mode plan = read-only mode (no tool execution).
-    // Without this, Gemini enters agentic mode when it sees source code
-    // and tries to use tools (replace, write_file, etc.) which fail and crash.
     // --approval-mode plan = read-only mode (no tool execution).
     // Requires experimental.plan=true in ~/.gemini/settings.json.
     // Without this, Gemini enters agentic mode when it sees source code
     // and tries to use tools (replace, write_file, etc.) which crash in piped mode.
-    const result = await execa(this.command, ["-p", "", "--approval-mode", "plan"], {
-      input: prompt,
-      timeout,
-      reject: false,
-    });
+    try {
+      const result = await execa(this.command, ["-p", "", "--approval-mode", "plan"], {
+        input: prompt,
+        timeout,
+        reject: false,
+      });
 
-    if (result.exitCode !== 0) {
-      const errorMsg = result.stderr || result.stdout || "Unknown error";
-      throw new Error(`Gemini CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      if (result.exitCode !== 0) {
+        const errorMsg = result.stderr || result.stdout || "Unknown error";
+        throw new Error(`Gemini CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      }
+
+      return result.stdout;
+    } catch (error) {
+      throw classifyError(error, this.name);
     }
-
-    return result.stdout;
   }
 }

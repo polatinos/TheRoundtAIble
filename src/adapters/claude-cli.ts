@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import { BaseAdapter } from "./base.js";
+import { classifyError } from "../utils/errors.js";
 
 export class ClaudeCliAdapter extends BaseAdapter {
   readonly name = "Claude";
@@ -32,18 +33,22 @@ export class ClaudeCliAdapter extends BaseAdapter {
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    const result = await execa(this.command, ["--print"], {
-      input: prompt,
-      timeout,
-      reject: false,
-      env,
-    });
+    try {
+      const result = await execa(this.command, ["--print"], {
+        input: prompt,
+        timeout,
+        reject: false,
+        env,
+      });
 
-    if (result.exitCode !== 0) {
-      const errorMsg = result.stderr || result.stdout || "Unknown error";
-      throw new Error(`Claude CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      if (result.exitCode !== 0) {
+        const errorMsg = result.stderr || result.stdout || "Unknown error";
+        throw new Error(`Claude CLI failed (exit ${result.exitCode}): ${errorMsg}`);
+      }
+
+      return result.stdout;
+    } catch (error) {
+      throw classifyError(error, this.name);
     }
-
-    return result.stdout;
   }
 }

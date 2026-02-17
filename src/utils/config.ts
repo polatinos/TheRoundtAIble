@@ -2,13 +2,10 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { RoundtableConfig } from "../types.js";
+import { ConfigError } from "./errors.js";
 
-export class ConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ConfigError";
-  }
-}
+// Re-export so existing imports still work
+export { ConfigError };
 
 /**
  * Load and validate the .roundtable/config.json from a project root.
@@ -18,7 +15,8 @@ export async function loadConfig(projectRoot: string): Promise<RoundtableConfig>
 
   if (!existsSync(configPath)) {
     throw new ConfigError(
-      'No .roundtable/config.json found. Run "roundtable init" first.'
+      'No .roundtable/config.json found.',
+      { hint: 'Run "roundtable init" first.' }
     );
   }
 
@@ -28,7 +26,9 @@ export async function loadConfig(projectRoot: string): Promise<RoundtableConfig>
   try {
     config = JSON.parse(raw);
   } catch {
-    throw new ConfigError("Invalid config.json — could not parse JSON.");
+    throw new ConfigError("Invalid config.json — could not parse JSON.", {
+      hint: "Check for syntax errors in .roundtable/config.json",
+    });
   }
 
   validateConfig(config);
