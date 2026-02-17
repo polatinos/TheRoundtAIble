@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "../utils/config.js";
@@ -13,11 +13,72 @@ import {
   writeFilesDirect,
   writeFilesWithConfirmation,
   filterByScope,
+  normalizeScopePath,
 } from "../utils/file-writer.js";
 import { askParleyMode } from "../utils/decree.js";
 import { addManifestEntry, topicToFeatureId, getFeatureSummary } from "../utils/manifest.js";
+import { hashContent } from "../utils/hash.js";
 import type { ConsensusBlock, ManifestFeatureStatus } from "../types.js";
 import { createInterface } from "node:readline/promises";
+
+/**
+ * Maximum total characters of source context to inject.
+ * Beyond this, token overflow is likely. Hard fail with actionable hint.
+ */
+const MAX_SOURCE_CONTEXT_CHARS = 150_000;
+
+/**
+ * Read all existing allowed_files and build a source context string.
+ * Skips NEW: files (they don't exist yet).
+ * Returns formatted context with path + hash + content per file.
+ */
+async function buildSourceContext(
+  allowedFiles: string[],
+  projectRoot: string
+): Promise<{ context: string; totalChars: number; fileCount: number }> {
+  const blocks: string[] = [];
+  let totalChars = 0;
+  let fileCount = 0;
+
+  for (const entry of allowedFiles) {
+    // NEW: files don't exist yet — skip
+    if (entry.toUpperCase().startsWith("NEW:")) continue;
+
+    const normalized = normalizeScopePath(entry);
+    const fullPath = resolve(projectRoot, normalized);
+
+    if (!existsSync(fullPath)) {
+      blocks.push(
+        `=== SOURCE: ${normalized} (NOT FOUND — file does not exist yet) ===\n=== END SOURCE ===`
+      );
+      continue;
+    }
+
+    try {
+      const content = await readFile(fullPath, "utf-8");
+      const hash = hashContent(content);
+      const block = [
+        `=== SOURCE: ${normalized} (hash: ${hash}) ===`,
+        content,
+        `=== END SOURCE ===`,
+      ].join("\n");
+
+      blocks.push(block);
+      totalChars += content.length;
+      fileCount++;
+    } catch {
+      blocks.push(
+        `=== SOURCE: ${normalized} (READ ERROR — could not read file) ===\n=== END SOURCE ===`
+      );
+    }
+  }
+
+  return {
+    context: blocks.join("\n\n"),
+    totalChars,
+    fileCount,
+  };
+}
 
 /**
  * The `roundtable apply` command.
@@ -176,13 +237,44 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     await writeFileFs(overridePath, overrideLog, "utf-8");
   }
 
-  // Build execution prompt with file format instructions
+  // Build source context: read existing files so the knight sees current code
+  let sourceContextBlock = "";
+  if (allowedFiles && allowedFiles.length > 0) {
+    const spinner2 = ora(chalk.dim("  Reading source files for context...")).start();
+    const { context, totalChars, fileCount } = await buildSourceContext(allowedFiles, projectRoot);
+    spinner2.succeed(chalk.dim(`  ${fileCount} source file(s) loaded (${Math.round(totalChars / 1024)}KB)`));
+
+    // Hard fail on token overflow
+    if (totalChars > MAX_SOURCE_CONTEXT_CHARS) {
+      throw new SessionError(
+        `Source context too large: ${Math.round(totalChars / 1024)}KB exceeds ${Math.round(MAX_SOURCE_CONTEXT_CHARS / 1024)}KB limit.`,
+        {
+          hint: "Reduce the scope (fewer allowed_files) or split into smaller apply sessions.",
+        }
+      );
+    }
+
+    sourceContextBlock = context;
+  }
+
+  // Build execution prompt with source context + file format instructions
   const scopeLines = scopeActive
     ? [
         "",
         "SCOPE RESTRICTION — You may ONLY modify these files:",
         ...allowedFiles!.map((f) => `  - ${f}`),
         "Do NOT create or modify files outside this list.",
+        "",
+      ]
+    : [];
+
+  const sourceContextLines = sourceContextBlock
+    ? [
+        "",
+        "CURRENT SOURCE CODE — This is the EXISTING code in each file.",
+        "You MUST use this as your base. DO NOT rewrite from memory.",
+        "",
+        sourceContextBlock,
         "",
       ]
     : [];
@@ -195,10 +287,20 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     `You are ${leadKnight.name}, the Lead Knight chosen to implement the following decision.`,
     `Your capabilities: ${leadKnight.capabilities.join(", ")}`,
     ...scopeLines,
+    ...sourceContextLines,
     "DECISION TO IMPLEMENT:",
     "---",
     decision,
     "---",
+    "",
+    "MANDATORY EDITING RULES (VIOLATION = REJECTED OUTPUT):",
+    "1. EDIT, DON'T REWRITE — only change what the decision requires.",
+    "2. KEEP all existing functionality intact — every import, export, function, type.",
+    "3. For NEW: files (not in source context), output the complete new file.",
+    "4. For existing files, output the COMPLETE file but PRESERVE all existing code.",
+    "5. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
+    "6. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
+    "7. Compare your output against the source context above — if you removed something, ADD IT BACK.",
     "",
     "OUTPUT FORMAT — follow this EXACTLY:",
     "For EACH file, output this pattern:",
