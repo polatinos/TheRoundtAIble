@@ -86,14 +86,66 @@ export interface ProjectContext {
   recentCommits: string | null;
   projectFiles: string[];
   keyFileContents: string;
+  sourceFileContents: string;
+}
+
+/** Files to always exclude from source reading (noise, not context) */
+const SOURCE_EXCLUDE = [
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lockb",
+  ".env",
+  ".env.local",
+];
+
+/**
+ * Read source files from the codebase for context.
+ * Filters to common source extensions, excludes lock files.
+ * @param maxChars - maximum characters to read (default 50000)
+ */
+export async function readSourceFiles(
+  projectRoot: string,
+  ignorePatterns: string[],
+  maxChars = 50000
+): Promise<string> {
+  const files = await getProjectFiles(projectRoot, ignorePatterns);
+
+  const sourceExts = [".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".json"];
+  const sourceFiles = files
+    .filter((f) => sourceExts.some((ext) => f.endsWith(ext)))
+    .filter((f) => !SOURCE_EXCLUDE.some((ex) => f.endsWith(ex)))
+    .slice(0, 30);
+
+  const contents: string[] = [];
+  let totalChars = 0;
+
+  for (const file of sourceFiles) {
+    if (totalChars >= maxChars) break;
+
+    try {
+      const content = await readFile(join(projectRoot, file), "utf-8");
+      const truncated = content.slice(0, Math.min(content.length, maxChars - totalChars));
+      contents.push(`### ${file}\n\`\`\`\n${truncated}\n\`\`\``);
+      totalChars += truncated.length;
+    } catch {
+      // Skip unreadable
+    }
+  }
+
+  return contents.join("\n\n");
 }
 
 /**
  * Build the full project context for a discussion.
+ * @param readSourceCode - if true, reads source files for deeper context (default: false)
+ * @param maxSourceChars - max chars for source reading (default 20000 for discuss, code-red uses 50000)
  */
 export async function buildContext(
   projectRoot: string,
-  config: RoundtableConfig
+  config: RoundtableConfig,
+  readSourceCode = false,
+  maxSourceChars = 20000
 ): Promise<ProjectContext> {
   const [chronicle, gitBranch, gitDiff, recentCommits, projectFiles] =
     await Promise.all([
@@ -106,6 +158,11 @@ export async function buildContext(
 
   const keyFileContents = await readKeyFiles(projectRoot, projectFiles);
 
+  let sourceFileContents = "";
+  if (readSourceCode) {
+    sourceFileContents = await readSourceFiles(projectRoot, config.rules.ignore, maxSourceChars);
+  }
+
   return {
     chronicle,
     gitBranch,
@@ -113,5 +170,6 @@ export async function buildContext(
     recentCommits,
     projectFiles,
     keyFileContents,
+    sourceFileContents,
   };
 }

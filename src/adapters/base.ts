@@ -1,4 +1,5 @@
 import type { ConsensusBlock } from "../types.js";
+import { validateFilesToModify } from "../consensus.js";
 
 export type AdapterErrorKind = "not_installed" | "timeout" | "auth" | "api" | "unknown";
 
@@ -70,6 +71,7 @@ export abstract class BaseAdapter {
             agrees_with: Array.isArray(parsed.agrees_with) ? parsed.agrees_with : [],
             pending_issues: Array.isArray(parsed.pending_issues) ? parsed.pending_issues : [],
             proposal: parsed.proposal,
+            files_to_modify: validateFilesToModify(parsed.files_to_modify),
           };
         }
       } catch {

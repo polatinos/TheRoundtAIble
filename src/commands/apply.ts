@@ -11,9 +11,12 @@ import {
   parseCodeBlocks,
   writeFilesDirect,
   writeFilesWithConfirmation,
+  filterByScope,
 } from "../utils/file-writer.js";
 import { askParleyMode } from "../utils/decree.js";
-import type { ConsensusBlock } from "../types.js";
+import { addManifestEntry, topicToFeatureId, getFeatureSummary } from "../utils/manifest.js";
+import type { ConsensusBlock, ManifestFeatureStatus } from "../types.js";
+import { createInterface } from "node:readline/promises";
 
 /**
  * The `roundtable apply` command.
@@ -24,7 +27,7 @@ import type { ConsensusBlock } from "../types.js";
  *   --parley (default) — shows each file, asks for confirmation
  *   --noparley — writes everything directly ("dangerous mode")
  */
-export async function applyCommand(initialNoparley = false): Promise<void> {
+export async function applyCommand(initialNoparley = false, overrideScope = false): Promise<void> {
   let noparley = initialNoparley;
   const projectRoot = process.cwd();
 
@@ -131,7 +134,69 @@ export async function applyCommand(initialNoparley = false): Promise<void> {
     process.exit(1);
   }
 
+  // Read allowed_files from session status for scope enforcement
+  const allowedFiles = status.allowed_files;
+  const scopeActive = allowedFiles && allowedFiles.length > 0 && !overrideScope;
+
+  // Show scope info
+  if (allowedFiles && allowedFiles.length > 0) {
+    console.log(chalk.cyan(`  Scope: ${allowedFiles.length} file(s) allowed:`));
+    for (const f of allowedFiles) {
+      const isNew = f.toUpperCase().startsWith("NEW:");
+      const display = isNew ? f.slice(4) : f;
+      console.log(isNew ? chalk.green(`    + ${display} (new)`) : chalk.dim(`    ~ ${display}`));
+    }
+    console.log("");
+  }
+
+  // Override scope flow: require explicit confirmation with reason
+  if (overrideScope && allowedFiles && allowedFiles.length > 0) {
+    console.log(chalk.red.bold("  SCOPE OVERRIDE requested."));
+    console.log(chalk.yellow("  This bypasses the agreed file scope. All files will be written.\n"));
+
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const confirm = await rl.question(chalk.red('  Type "YES" to confirm override: '));
+
+    if (confirm.trim() !== "YES") {
+      rl.close();
+      console.log(chalk.dim("  Override cancelled. Scope enforcement remains active."));
+      return;
+    }
+
+    const reason = await rl.question(chalk.yellow("  Reason for override: "));
+    rl.close();
+
+    if (!reason.trim()) {
+      console.log(chalk.red("  A reason is required for scope override. Cancelled."));
+      return;
+    }
+
+    console.log(chalk.dim(`\n  Override logged: "${reason.trim()}"\n`));
+
+    // Log override to session
+    const { writeFile: writeFileFs } = await import("node:fs/promises");
+    const overrideLog = [
+      `## Scope Override`,
+      `**Date:** ${new Date().toISOString()}`,
+      `**Reason:** ${reason.trim()}`,
+      `**Original scope:** ${allowedFiles.join(", ")}`,
+      "",
+    ].join("\n");
+    const overridePath = join(session.path, "scope-override.md");
+    await writeFileFs(overridePath, overrideLog, "utf-8");
+  }
+
   // Build execution prompt with file format instructions
+  const scopeLines = scopeActive
+    ? [
+        "",
+        "SCOPE RESTRICTION — You may ONLY modify these files:",
+        ...allowedFiles!.map((f) => `  - ${f}`),
+        "Do NOT create or modify files outside this list.",
+        "",
+      ]
+    : [];
+
   const executionPrompt = [
     "CRITICAL: You are running in TEXT-ONLY output mode.",
     "You CANNOT write files, use tools, or edit anything.",
@@ -139,7 +204,7 @@ export async function applyCommand(initialNoparley = false): Promise<void> {
     "",
     `You are ${leadKnight.name}, the Lead Knight chosen to implement the following decision.`,
     `Your capabilities: ${leadKnight.capabilities.join(", ")}`,
-    "",
+    ...scopeLines,
     "DECISION TO IMPLEMENT:",
     "---",
     decision,
@@ -174,9 +239,9 @@ export async function applyCommand(initialNoparley = false): Promise<void> {
     spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
 
     // Parse code blocks from response
-    const files = parseCodeBlocks(result);
+    const allFiles = parseCodeBlocks(result);
 
-    if (files.length === 0) {
+    if (allFiles.length === 0) {
       console.log(
         chalk.yellow(
           "\n  The knight returned... but brought no files. Just words."
@@ -196,26 +261,64 @@ export async function applyCommand(initialNoparley = false): Promise<void> {
       return;
     }
 
+    // Apply scope filtering
+    const { allowed: files, rejected } = filterByScope(allFiles, scopeActive ? allowedFiles : undefined);
+
+    if (rejected.length > 0) {
+      console.log(chalk.red.bold(`\n  SCOPE VIOLATION — ${rejected.length} file(s) blocked:`));
+      for (const f of rejected) {
+        console.log(chalk.red(`    ${f.path}`));
+      }
+      console.log(chalk.dim(`\n  These files were not in the agreed scope.`));
+      console.log(chalk.dim(`  Use ${chalk.bold("roundtable apply --override-scope")} to bypass.\n`));
+    }
+
+    if (files.length === 0) {
+      console.log(chalk.yellow("\n  All files were outside scope. Nothing to write."));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      return;
+    }
+
     console.log(
       chalk.bold(`\n  ${files.length} file(s) forged by ${leadKnight.name}:\n`)
     );
 
     // Write files based on mode
-    let written: number;
+    let writeResult;
     if (noparley) {
       console.log(chalk.red("  No parley mode — writing all files directly.\n"));
-      written = await writeFilesDirect(files, projectRoot);
+      writeResult = await writeFilesDirect(files, projectRoot);
     } else {
       console.log(chalk.dim("  Let's review what the knight proposes:\n"));
-      written = await writeFilesWithConfirmation(files, projectRoot);
+      writeResult = await writeFilesWithConfirmation(files, projectRoot);
     }
 
-    // Update status
-    if (written > 0) {
+    // Update status + write manifest entry
+    if (writeResult.count > 0) {
       await updateStatus(session.path, { phase: "completed" });
+
+      // Write manifest entry
+      const topic = session.topic || "unknown";
+      const featureId = topicToFeatureId(topic);
+      const featureSummary = await getFeatureSummary(session.path, topic);
+      const featureStatus: ManifestFeatureStatus =
+        writeResult.skippedPaths.length > 0 ? "partial" : "implemented";
+
+      await addManifestEntry(projectRoot, {
+        id: featureId,
+        session: session.name,
+        status: featureStatus,
+        files: writeResult.writtenPaths,
+        files_skipped: writeResult.skippedPaths.length > 0 ? writeResult.skippedPaths : undefined,
+        summary: featureSummary,
+        applied_at: new Date().toISOString(),
+        lead_knight: leadKnight.name,
+      });
+
       console.log(
-        chalk.bold.green(`\n  ${written} file(s) written. The decision has been executed.`)
+        chalk.bold.green(`\n  ${writeResult.count} file(s) written. The decision has been executed.`)
       );
+      console.log(chalk.dim(`  Manifest updated: ${featureId} [${featureStatus}]`));
       console.log(chalk.dim("  Review the changes before committing.\n"));
     } else {
       console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));

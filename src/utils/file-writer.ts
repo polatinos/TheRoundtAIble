@@ -9,6 +9,76 @@ export interface ParsedFile {
   language: string;
 }
 
+export interface ScopeFilterResult {
+  allowed: ParsedFile[];
+  rejected: ParsedFile[];
+}
+
+/**
+ * Normalize a path for scope comparison.
+ * Trims whitespace, uses forward slashes, removes leading ./
+ */
+export function normalizeScopePath(path: string): string {
+  return path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "");
+}
+
+/**
+ * Check if a path escapes the project root via ".." traversal.
+ */
+export function isPathEscaping(filePath: string, projectRoot: string): boolean {
+  const fullPath = resolve(projectRoot, filePath);
+  const resolvedRoot = resolve(projectRoot);
+  return !fullPath.startsWith(resolvedRoot);
+}
+
+/**
+ * Check if a file path is allowed by the scope allowlist.
+ * Handles NEW: prefix — a NEW:path/to/file entry allows path/to/file.
+ */
+export function isPathAllowed(filePath: string, allowedFiles: string[]): boolean {
+  const normalized = normalizeScopePath(filePath);
+
+  for (const allowed of allowedFiles) {
+    // Strip NEW: prefix for comparison
+    const cleanAllowed = allowed.toUpperCase().startsWith("NEW:")
+      ? normalizeScopePath(allowed.slice(4))
+      : normalizeScopePath(allowed);
+
+    if (normalized === cleanAllowed) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Split files into allowed and rejected based on scope allowlist.
+ * If allowedFiles is empty/undefined, all files are allowed (backward compat).
+ */
+export function filterByScope(
+  files: ParsedFile[],
+  allowedFiles?: string[]
+): ScopeFilterResult {
+  if (!allowedFiles || allowedFiles.length === 0) {
+    return { allowed: files, rejected: [] };
+  }
+
+  const allowed: ParsedFile[] = [];
+  const rejected: ParsedFile[] = [];
+
+  for (const file of files) {
+    if (isPathAllowed(file.path, allowedFiles)) {
+      allowed.push(file);
+    } else {
+      rejected.push(file);
+    }
+  }
+
+  return { allowed, rejected };
+}
+
 /**
  * Parse code blocks from a Lead Knight's response.
  * Looks for `FILE: path/to/file` followed by a fenced code block.
@@ -82,41 +152,61 @@ function languageToExtension(lang: string): string {
   return map[lang.toLowerCase()] || lang;
 }
 
+export interface WriteResult {
+  count: number;
+  writtenPaths: string[];
+  skippedPaths: string[];
+}
+
 /**
  * Write files directly without asking (noparley mode).
- * Returns count of files written.
+ * Returns written/skipped paths for manifest tracking.
  */
 export async function writeFilesDirect(
   files: ParsedFile[],
   projectRoot: string
-): Promise<number> {
-  let written = 0;
+): Promise<WriteResult> {
+  const writtenPaths: string[] = [];
+  const skippedPaths: string[] = [];
 
   for (const file of files) {
+    if (isPathEscaping(file.path, projectRoot)) {
+      console.log(chalk.red(`  BLOCKED: ${file.path} — path escapes project root`));
+      skippedPaths.push(file.path);
+      continue;
+    }
+
     const fullPath = resolve(projectRoot, file.path);
     const dir = dirname(fullPath);
 
     await mkdir(dir, { recursive: true });
     await writeFile(fullPath, file.content, "utf-8");
-    written++;
+    writtenPaths.push(file.path);
 
     console.log(chalk.green(`  + ${file.path}`));
   }
 
-  return written;
+  return { count: writtenPaths.length, writtenPaths, skippedPaths };
 }
 
 /**
  * Write files with per-file confirmation (parley mode).
- * Returns count of files written.
+ * Returns written/skipped paths for manifest tracking.
  */
 export async function writeFilesWithConfirmation(
   files: ParsedFile[],
   projectRoot: string
-): Promise<number> {
-  let written = 0;
+): Promise<WriteResult> {
+  const writtenPaths: string[] = [];
+  const skippedPaths: string[] = [];
 
   for (const file of files) {
+    if (isPathEscaping(file.path, projectRoot)) {
+      console.log(chalk.red(`  BLOCKED: ${file.path} — path escapes project root`));
+      skippedPaths.push(file.path);
+      continue;
+    }
+
     console.log(chalk.bold(`\n  ${chalk.cyan(file.path)}`));
     console.log(chalk.dim("  " + "─".repeat(50)));
 
@@ -148,12 +238,13 @@ export async function writeFilesWithConfirmation(
       const dir = dirname(fullPath);
       await mkdir(dir, { recursive: true });
       await writeFile(fullPath, file.content, "utf-8");
-      written++;
+      writtenPaths.push(file.path);
       console.log(chalk.green(`  + Written: ${file.path}`));
     } else {
+      skippedPaths.push(file.path);
       console.log(chalk.dim(`  - Skipped: ${file.path}`));
     }
   }
 
-  return written;
+  return { count: writtenPaths.length, writtenPaths, skippedPaths };
 }

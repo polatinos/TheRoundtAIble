@@ -11,6 +11,12 @@ import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
 import { codeRedCommand } from "./commands/code-red.js";
+import {
+  manifestListCommand,
+  manifestAddCommand,
+  manifestDeprecateCommand,
+  manifestCheckCommand,
+} from "./commands/manifest.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -64,9 +70,10 @@ program
   .command("apply")
   .description("Apply the consensus decision (Lead Knight executes)")
   .option("--noparley", "Skip file confirmation — write everything directly (dangerous)")
-  .action(async (options: { noparley?: boolean }) => {
+  .option("--override-scope", "Bypass scope enforcement (requires confirmation and reason)")
+  .action(async (options: { noparley?: boolean; overrideScope?: boolean }) => {
     try {
-      await applyCommand(options.noparley ?? false);
+      await applyCommand(options.noparley ?? false, options.overrideScope ?? false);
     } catch (error) {
       console.error(chalk.red("The knight dropped their sword:"), error);
       process.exit(1);
@@ -117,6 +124,60 @@ program
       await codeRedCommand(symptoms);
     } catch (error) {
       console.error(chalk.red("The patient flatlined:"), error);
+      process.exit(1);
+    }
+  });
+
+const manifestCmd = program
+  .command("manifest")
+  .description("Manage the implementation manifest");
+
+manifestCmd
+  .command("list")
+  .description("Show all tracked features")
+  .action(async () => {
+    try {
+      await manifestListCommand();
+    } catch (error) {
+      console.error(chalk.red("The manifest crumbled:"), error);
+      process.exit(1);
+    }
+  });
+
+manifestCmd
+  .command("add <feature-id>")
+  .description("Manually add a feature to the manifest")
+  .option("--files <files...>", "Files included in this feature")
+  .action(async (featureId: string, options: { files?: string[] }) => {
+    try {
+      await manifestAddCommand(featureId, options.files || []);
+    } catch (error) {
+      console.error(chalk.red("The manifest crumbled:"), error);
+      process.exit(1);
+    }
+  });
+
+manifestCmd
+  .command("deprecate <feature-id>")
+  .description("Mark a feature as deprecated")
+  .option("--replaced-by <id>", "ID of the replacement feature")
+  .action(async (featureId: string, options: { replacedBy?: string }) => {
+    try {
+      await manifestDeprecateCommand(featureId, options.replacedBy);
+    } catch (error) {
+      console.error(chalk.red("The manifest crumbled:"), error);
+      process.exit(1);
+    }
+  });
+
+manifestCmd
+  .command("check")
+  .description("Check manifest for stale entries")
+  .action(async () => {
+    try {
+      await manifestCheckCommand();
+    } catch (error) {
+      console.error(chalk.red("The manifest crumbled:"), error);
       process.exit(1);
     }
   });

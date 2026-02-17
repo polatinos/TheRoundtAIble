@@ -1,4 +1,68 @@
+import chalk from "chalk";
 import type { ConsensusBlock, DiagnosticBlock } from "./types.js";
+
+/**
+ * Validate and normalize a files_to_modify array from a consensus block.
+ * - Relative paths only, forward slashes, no "..", dedupe
+ * - NEW: prefix detection and normalization
+ * - Invalid paths are silently skipped
+ */
+export function validateFilesToModify(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+
+    let path = item.trim();
+    if (!path) continue;
+
+    // Detect NEW: prefix
+    let isNew = false;
+    if (path.toUpperCase().startsWith("NEW:")) {
+      isNew = true;
+      path = path.slice(4).trim();
+    }
+
+    // Normalize: forward slashes, remove leading ./
+    path = path.replace(/\\/g, "/");
+    if (path.startsWith("./")) path = path.slice(2);
+
+    // Security: reject absolute paths and path traversal
+    if (path.startsWith("/") || path.includes("..")) continue;
+
+    // Reject empty after normalization
+    if (!path) continue;
+
+    // Re-add NEW: prefix if detected
+    const normalized = isNew ? `NEW:${path}` : path;
+
+    // Dedupe
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+/**
+ * Warn (but don't block) if a knight has score >= 9 but no files_to_modify.
+ */
+export function warnMissingScopeAtConsensus(block: ConsensusBlock): void {
+  if (
+    block.consensus_score >= 9 &&
+    (!block.files_to_modify || block.files_to_modify.length === 0)
+  ) {
+    console.log(
+      chalk.yellow(
+        `  Warning: ${block.knight} agreed (score ${block.consensus_score}) but didn't specify files_to_modify. Scope enforcement will be skipped for this knight.`
+      )
+    );
+  }
+}
 
 /**
  * Parse a consensus JSON block from an LLM response string.
@@ -29,6 +93,7 @@ export function parseConsensusFromResponse(
           agrees_with: Array.isArray(parsed.agrees_with) ? parsed.agrees_with : [],
           pending_issues: Array.isArray(parsed.pending_issues) ? parsed.pending_issues : [],
           proposal: parsed.proposal,
+          files_to_modify: validateFilesToModify(parsed.files_to_modify),
         };
       }
     } catch {
@@ -78,6 +143,10 @@ export function summarizeConsensus(blocks: ConsensusBlock[]): string {
 
     if (block.pending_issues.length > 0) {
       lines.push(`  Pending: ${block.pending_issues.join(", ")}`);
+    }
+
+    if (block.files_to_modify && block.files_to_modify.length > 0) {
+      lines.push(`  Scope: ${block.files_to_modify.join(", ")}`);
     }
   }
 

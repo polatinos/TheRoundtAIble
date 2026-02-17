@@ -223,6 +223,12 @@ export async function initCommand(): Promise<void> {
     "utf-8"
   );
 
+  await writeFile(
+    join(roundtablePath, "manifest.json"),
+    JSON.stringify({ version: "1.0", last_updated: new Date().toISOString(), features: [] }, null, 2),
+    "utf-8"
+  );
+
   structureSpinner.succeed("  The roundtable is forged");
 
   // 7. Summary

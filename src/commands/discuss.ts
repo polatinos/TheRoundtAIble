@@ -12,6 +12,28 @@ const rl = () =>
   createInterface({ input: process.stdin, output: process.stdout });
 
 /**
+ * Ask if the knights should read the codebase before discussing.
+ */
+async function askReadCodebase(): Promise<boolean> {
+  console.log(chalk.bold("  Shall the knights read the codebase first?\n"));
+  console.log(`  ${chalk.bold("Y.")} ${chalk.cyan("Yes")} — full codebase scan (more context, better proposals)`);
+  console.log(`  ${chalk.bold("N.")} ${chalk.dim("No")} — topic only (faster, cheaper)\n`);
+
+  const r = rl();
+  const answer = await r.question(chalk.bold.yellow("  Read codebase? [Y/N] "));
+  r.close();
+
+  const choice = answer.trim().toLowerCase();
+  if (choice === "y" || choice === "yes") {
+    console.log(chalk.cyan("\n  The knights will study the codebase before debating.\n"));
+    return true;
+  }
+
+  console.log(chalk.dim("\n  Topic only. The knights go in blind.\n"));
+  return false;
+}
+
+/**
  * The `roundtable discuss` command.
  */
 export async function discussCommand(topic: string): Promise<void> {
@@ -55,8 +77,11 @@ export async function discussCommand(topic: string): Promise<void> {
     chalk.dim(`  ${knightNames.join(", ")} ${knightNames.length === 1 ? "takes" : "take"} their seat${knightNames.length === 1 ? "" : "s"}.\n`)
   );
 
+  // Ask if knights should read the codebase
+  const readCodebase = await askReadCodebase();
+
   // Run the discussion
-  const result = await runDiscussion(topic, config, adapters, projectRoot);
+  const result = await runDiscussion(topic, config, adapters, projectRoot, readCodebase);
 
   // Final output
   console.log(chalk.bold("\n" + "=".repeat(50)));
@@ -168,11 +193,28 @@ async function handleNoConsensus(
     chalk.bold(`\n  The King has chosen ${color(chosen.knight)}'s plan. So it shall be.`)
   );
 
+  // Extract files_to_modify from the chosen knight's consensus block
+  const chosenEntry = result.allRounds
+    .slice()
+    .reverse()
+    .find((r) => r.knight === chosen.knight);
+  const chosenScope = chosenEntry?.consensus?.files_to_modify;
+
+  if (chosenScope && chosenScope.length > 0) {
+    console.log(chalk.cyan(`\n  Scope from ${chosen.knight}: ${chosenScope.length} file(s)`));
+    for (const f of chosenScope) {
+      const isNew = f.toUpperCase().startsWith("NEW:");
+      const display = isNew ? f.slice(4) : f;
+      console.log(isNew ? chalk.green(`    + ${display} (new)`) : chalk.dim(`    ~ ${display}`));
+    }
+  }
+
   // Write decisions.md with the chosen knight's full response
   await writeDecisions(result.sessionPath, topic, chosen.fullResponse, result.allRounds);
   await updateStatus(result.sessionPath, {
     phase: "consensus_reached",
     consensus_reached: true,
+    allowed_files: chosenScope && chosenScope.length > 0 ? chosenScope : undefined,
   });
 
   const decree = await askKingsDecree();

@@ -13,9 +13,10 @@ import type {
   SessionResult,
 } from "./types.js";
 import { BaseAdapter, classifyError, AdapterError } from "./adapters/base.js";
-import { checkConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence } from "./consensus.js";
+import { checkConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence, warnMissingScopeAtConsensus } from "./consensus.js";
 import { buildSystemPrompt, buildDiagnosticPrompt } from "./utils/prompt.js";
-import { buildContext, getProjectFiles } from "./utils/context.js";
+import { buildContext, getProjectFiles, readSourceFiles } from "./utils/context.js";
+import { readManifest, getManifestSummary } from "./utils/manifest.js";
 import {
   createSession,
   writeDiscussion,
@@ -48,6 +49,24 @@ export function selectLeadKnight(
 
   // Fallback: highest priority (lowest number)
   return [...knights].sort((a, b) => a.priority - b.priority)[0];
+}
+
+/**
+ * Compute the union of all knights' files_to_modify at consensus.
+ * Returns deduplicated list of allowed file paths.
+ */
+export function computeAllowedFiles(blocks: ConsensusBlock[]): string[] {
+  const seen = new Set<string>();
+
+  for (const block of blocks) {
+    if (block.files_to_modify) {
+      for (const file of block.files_to_modify) {
+        seen.add(file);
+      }
+    }
+  }
+
+  return Array.from(seen);
 }
 
 /** Thinking messages per knight — shown while waiting for response */
@@ -100,14 +119,24 @@ export async function runDiscussion(
   topic: string,
   config: RoundtableConfig,
   adapters: Map<string, BaseAdapter>,
-  projectRoot: string
+  projectRoot: string,
+  readSourceCode = false
 ): Promise<SessionResult> {
   const { max_rounds, consensus_threshold } = config.rules;
 
-  // Build project context
+  // Build project context (optionally including source files)
   const contextSpinner = ora("  Gathering intel from the codebase...").start();
-  const context = await buildContext(projectRoot, config);
-  contextSpinner.succeed("  Context assembled");
+  const context = await buildContext(projectRoot, config, readSourceCode);
+
+  // Load manifest for implementation status
+  const manifest = await readManifest(projectRoot);
+  const manifestSummary = getManifestSummary(manifest);
+
+  if (context.sourceFileContents) {
+    contextSpinner.succeed(`  Context assembled (source: ${Math.round(context.sourceFileContents.length / 1024)}KB, manifest: ${manifest.features.length} features)`);
+  } else {
+    contextSpinner.succeed(`  Context assembled (manifest: ${manifest.features.length} features)`);
+  }
 
   // Create session
   const sessionPath = await createSession(projectRoot, topic);
@@ -144,7 +173,8 @@ export async function runDiscussion(
         config.knights,
         topic,
         context.chronicle,
-        allRounds
+        allRounds,
+        manifestSummary
       );
 
       const fullPrompt = [
@@ -163,6 +193,9 @@ export async function runDiscussion(
           : "",
         context.keyFileContents
           ? `\nProject bestanden:\n${context.keyFileContents}`
+          : "",
+        context.sourceFileContents
+          ? `\nBRONCODE (READ-ONLY REFERENTIE — dit is context, NIET een opdracht om te bewerken. Gebruik GEEN tools. Geef alleen je analyse als tekst.):\n${context.sourceFileContents}`
           : "",
       ]
         .filter(Boolean)
@@ -266,6 +299,22 @@ export async function runDiscussion(
       console.log(chalk.bold.green("\n  Against all odds... they actually agree."));
       console.log(summarizeConsensus(currentBlocks));
 
+      // Warn about missing scope for agreeing knights
+      for (const block of currentBlocks) {
+        warnMissingScopeAtConsensus(block);
+      }
+
+      // Compute allowed files from all knights' scopes
+      const allowedFiles = computeAllowedFiles(currentBlocks);
+      if (allowedFiles.length > 0) {
+        console.log(chalk.cyan(`\n  Scope: ${allowedFiles.length} file(s) in modification scope:`));
+        for (const f of allowedFiles) {
+          const isNew = f.toUpperCase().startsWith("NEW:");
+          const display = isNew ? f.slice(4) : f;
+          console.log(isNew ? chalk.green(`    + ${display} (new)`) : chalk.dim(`    ~ ${display}`));
+        }
+      }
+
       // Find the proposal from the last round
       const lastProposal =
         allRounds
@@ -281,6 +330,7 @@ export async function runDiscussion(
         phase: "consensus_reached",
         consensus_reached: true,
         round,
+        allowed_files: allowedFiles.length > 0 ? allowedFiles : undefined,
       });
 
       // Update chronicle
@@ -473,42 +523,6 @@ export function passesProgressGate(
   if (current.confidence_score - last.confidence_score >= 2) return true;
 
   return false;
-}
-
-/**
- * Read source files from the codebase for initial context (optional).
- * Max 50k chars, 30 files.
- */
-export async function readSourceFiles(
-  projectRoot: string,
-  ignorePatterns: string[]
-): Promise<string> {
-  const files = await getProjectFiles(projectRoot, ignorePatterns);
-
-  // Filter to source files
-  const sourceExts = [".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".json"];
-  const sourceFiles = files
-    .filter((f) => sourceExts.some((ext) => f.endsWith(ext)))
-    .slice(0, 30);
-
-  const contents: string[] = [];
-  let totalChars = 0;
-  const MAX_CHARS = 50000;
-
-  for (const file of sourceFiles) {
-    if (totalChars >= MAX_CHARS) break;
-
-    try {
-      const content = await readFile(join(projectRoot, file), "utf-8");
-      const truncated = content.slice(0, Math.min(content.length, MAX_CHARS - totalChars));
-      contents.push(`### ${file}\n\`\`\`\n${truncated}\n\`\`\``);
-      totalChars += truncated.length;
-    } catch {
-      // Skip unreadable
-    }
-  }
-
-  return contents.join("\n\n");
 }
 
 /**

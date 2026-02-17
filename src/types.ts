@@ -44,6 +44,7 @@ export interface ConsensusBlock {
   agrees_with: string[];
   pending_issues: string[];
   proposal?: string;
+  files_to_modify?: string[];
 }
 
 export interface DiagnosticBlock {
@@ -108,6 +109,7 @@ export interface SessionStatus {
   updated_at: string;
   lead_knight?: string;
   decisions_hash?: string;
+  allowed_files?: string[];
 }
 
 export interface SessionResult {
@@ -118,6 +120,30 @@ export interface SessionResult {
   blocks: ConsensusBlock[];
   allRounds: RoundEntry[];
 }
+
+// --- Manifest types ---
+
+export type ManifestFeatureStatus = "implemented" | "partial" | "deprecated";
+
+export interface ManifestEntry {
+  id: string;
+  session: string;
+  status: ManifestFeatureStatus;
+  files: string[];
+  files_skipped?: string[];
+  summary: string;
+  applied_at: string;
+  lead_knight: string;
+  replaced_by?: string;
+}
+
+export interface Manifest {
+  version: "1.0";
+  last_updated: string;
+  features: ManifestEntry[];
+}
+
+// --- File change types ---
 
 export interface FileChange {
   path: string;
