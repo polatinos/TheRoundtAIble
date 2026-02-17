@@ -60,7 +60,7 @@ program
   .description("Initialize TheRoundtAIble in the current project")
   .action(async () => {
     try {
-      await initCommand();
+      await initCommand(pkg.version);
     } catch (error) {
       handleCliError(error);
     }

@@ -122,7 +122,7 @@ function generateConfig(
 /**
  * The `roundtable init` command.
  */
-export async function initCommand(): Promise<void> {
+export async function initCommand(version: string): Promise<void> {
   const projectRoot = process.cwd();
   const roundtablePath = join(projectRoot, ".roundtable");
 
@@ -139,6 +139,7 @@ export async function initCommand(): Promise<void> {
   }
 
   console.log(chalk.bold("\n  Welcome to TheRoundtAIble\n"));
+  console.log(chalk.dim(`  Version: v${version}`));
   console.log(chalk.dim("  Where no AI is King, but all serve the Code.\n"));
 
   // 1. Project name
