@@ -2,3 +2,16 @@ node_modules/
 dist/
 .env
 *.tsbuildinfo
+
+# Personal/private files — NOT for open source
+CLAUDE.md
+GEMINI.md
+SESSIONS.md
+SUMMARY.md
+theroundtaible.md
+
+# Local roundtable data
+.roundtable/config.json
+.roundtable/chronicle.md
+.roundtable/sessions/
+.roundtable/error-log.md

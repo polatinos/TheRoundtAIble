@@ -8,52 +8,57 @@ A CLI tool that lets multiple AI models (Claude, Gemini, GPT) automatically disc
 
 1. You ask a question
 2. TheRoundtAIble sends it to your configured AI "knights"
-3. Each knight responds and scores how much they agree
+3. Each knight responds with their proposal and scores agreement (0-10)
 4. Rounds continue until **consensus** is reached or max rounds hit
-5. The decision is saved and a Lead Knight can execute it
+5. You choose: let the Lead Knight execute, do it yourself, or decide later
 
 ```
 You: roundtable discuss "How should we refactor the auth module?"
 
-  Round 1:
-    Claude → proposes JWT with NextAuth wrapper (score: 7/10)
-    Gemini → agrees, suggests refresh token strategy (score: 8/10)
+  ROUND 1 — KNIGHTS! DRAW YOUR KEYBOARDS!
 
-  Round 2:
-    Claude → accepts refresh strategy, adds edge cases (score: 9/10)
-    Gemini → fully agrees (score: 10/10)
+    Claude (7/10) → proposes JWT with NextAuth wrapper
+    Gemini (8/10) → agrees, suggests refresh token strategy
+    GPT    (6/10) → "Can we just ship it?"
 
-  CONSENSUS REACHED
+  ROUND 2 — FOR KING AND KONG!
+
+    Claude (9/10) → accepts refresh strategy
+    Gemini (10/10) → fully agrees
+    GPT    (9/10)  → "Fine, let's do it properly"
+
+  Against all odds... they actually agree.
+
+  What is your decree, Your Majesty?
+  1. Let the knights forge it — they write the code
+  2. I'll wield the sword myself — just show me the plan
+  3. Adjourn the court — decide later
 ```
 
 ## Key principle
 
-**No API keys required by default.** Works with your existing subscriptions (Claude Pro/Max, Gemini Advanced, ChatGPT Plus). API keys are an optional fallback.
+**No API keys required by default.** Works with your existing AI subscriptions (Claude Pro/Max, Gemini Advanced, ChatGPT Plus). API keys are an optional fallback.
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/polatinos/TheRoundtAIble.git
-cd TheRoundtAIble
+npm install -g theroundtaible
+```
 
-# Install dependencies
-npm install
+Or use without installing:
 
-# Build
-npm run build
-
-# Link globally (optional, for `roundtable` command)
-npm link
+```bash
+npx theroundtaible init
 ```
 
 ### Prerequisites
 
 - Node.js 20+
-- At least one AI CLI tool:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
-  - Or an OpenAI API key (`OPENAI_API_KEY` env var)
+- At least one AI CLI tool installed:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `claude` command
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `gemini` command
+  - [Codex CLI](https://github.com/openai/codex) — `codex` command
+  - Or an OpenAI API key (`OPENAI_API_KEY` env var) as fallback
 
 ## Quick start
 
@@ -65,50 +70,33 @@ roundtable init
 # Start a discussion
 roundtable discuss "How should we structure the database schema?"
 
-# Check status
-roundtable status
+# Review based on current git changes
+roundtable summon
 
-# Apply the decision (Lead Knight executes)
+# Apply the consensus decision
 roundtable apply
+
+# Emergency bug diagnosis
+roundtable code-red "login page crashes on submit"
 ```
 
-### `roundtable init`
+## Commands
 
-Interactive wizard that:
-- Detects available AI tools on your system
-- Lets you choose which knights to enable
-- Generates `.roundtable/config.json`
-- Creates the chronicle (decision log)
-
-### `roundtable discuss "question"`
-
-Starts a discussion between your configured knights:
-- Builds project context (git info, key files, chronicle)
-- Runs round-robin turns until consensus or max rounds
-- Writes session files (discussion, decisions, status)
-
-### `roundtable summon`
-
-Starts a discussion based on your current `git diff` — useful for code review.
-
-## Project structure
-
-```
-your-project/
-  .roundtable/
-    config.json          # Which knights, rules, capabilities
-    chronicle.md         # Decision log (persistent memory)
-    sessions/
-      2026-02-16-auth-refactor/
-        topic.md         # The question
-        discussion.md    # Full discussion (all rounds)
-        decisions.md     # The consensus decision
-        status.json      # Current phase and progress
-```
+| Command | Description |
+|---------|-------------|
+| `roundtable init` | Interactive setup wizard — detects your AI tools |
+| `roundtable discuss "topic"` | Start a multi-AI discussion |
+| `roundtable summon` | Start a discussion based on your `git diff` |
+| `roundtable apply` | Execute the consensus decision (Lead Knight writes code) |
+| `roundtable apply --noparley` | Execute without file-by-file review (dangerous) |
+| `roundtable code-red "symptoms"` | Emergency diagnostic mode — knights become doctors |
+| `roundtable status` | Show current session status |
+| `roundtable list` | List all discussion sessions |
+| `roundtable chronicle` | View the decision log |
 
 ## Configuration
 
-After `roundtable init`, edit `.roundtable/config.json`:
+After `roundtable init`, your `.roundtable/config.json` controls everything:
 
 ```json
 {
@@ -119,6 +107,12 @@ After `roundtable init`, edit `.roundtable/config.json`:
       "capabilities": ["architecture", "debugging", "testing"],
       "priority": 1,
       "fallback": "claude-api"
+    },
+    {
+      "name": "Gemini",
+      "adapter": "gemini-cli",
+      "capabilities": ["docs", "ui-ux", "planning"],
+      "priority": 2
     }
   ],
   "rules": {
@@ -129,27 +123,68 @@ After `roundtable init`, edit `.roundtable/config.json`:
 }
 ```
 
-**Consensus threshold:** All knights must score >= this value (0-10) AND have no pending issues.
+**Consensus threshold:** All knights must score >= this value AND have no pending issues.
 
 ## Adapters
 
 | Adapter | Method | Subscription? | Fallback |
-|---------|--------|--------------|----------|
+|---------|--------|---------------|----------|
 | `claude-cli` | `claude -p "prompt" --print` | Claude Pro/Max | `claude-api` |
 | `gemini-cli` | `gemini -p "prompt"` | Gemini Advanced | `gemini-api` |
+| `openai-cli` | `codex "prompt"` | ChatGPT Pro | `openai-api` |
 | `openai-api` | OpenAI REST API | No (API key) | — |
+
+## Code-Red mode
+
+When a bug won't die, call in the doctors:
+
+```bash
+roundtable code-red "the API returns 500 on user creation"
+```
+
+The knights switch to diagnostic mode:
+- **Triage round:** Initial assessment of symptoms
+- **Blind round:** Each doctor diagnoses independently (prevents groupthink)
+- **Convergence rounds:** Doctors compare findings and converge on root cause
+- **File requests:** Doctors can request specific source files as evidence
+
+When they agree on a diagnosis, you choose: **Fix now**, **Report only**, or **Log for later**.
+
+All diagnoses are tracked in `.roundtable/error-log.md` with CR-XXX IDs.
+
+## Project structure
+
+```
+your-project/
+  .roundtable/
+    config.json          # Which knights, rules, capabilities
+    chronicle.md         # Decision log (persistent memory)
+    error-log.md         # Code-red diagnostic log
+    sessions/
+      2026-02-16-auth-refactor/
+        topic.md         # The question
+        discussion.md    # Full discussion (all rounds)
+        decisions.md     # The consensus decision
+        status.json      # Current phase and progress
+```
+
+## Architecture
+
+See [architecture-docs.md](architecture-docs.md) for the full technical architecture, project structure, and contribution guide.
 
 ## Roadmap
 
-- [x] CLI with `init` and `discuss`
+- [x] Multi-AI discussions with consensus
 - [x] Claude, Gemini, and OpenAI adapters
-- [x] Consensus engine
-- [x] Chronicle (decision memory)
-- [ ] `roundtable apply` — execute decisions
-- [ ] `roundtable summon` — git-diff based discussions
+- [x] Knight personalities (they roast each other)
+- [x] Apply decisions with Parley/No Parley modes
+- [x] Code-Red emergency diagnostic mode
+- [x] Git-diff based discussions (`summon`)
+- [x] Chronicle (persistent decision memory)
 - [ ] VS Code extension
-- [ ] Web dashboard
+- [ ] Web dashboard for session visualization
 - [ ] More adapters (DeepSeek, Llama, Mistral)
+- [ ] CI/CD integration (GitHub Actions)
 
 ## License
 

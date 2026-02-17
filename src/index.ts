@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { discussCommand } from "./commands/discuss.js";
@@ -11,6 +12,9 @@ import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
 import { codeRedCommand } from "./commands/code-red.js";
 
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+
 const program = new Command();
 
 program
@@ -18,7 +22,7 @@ program
   .description(
     "TheRoundtAIble — Where no AI is King, but all serve the Code."
   )
-  .version("0.1.0");
+  .version(pkg.version);
 
 program
   .command("init")
