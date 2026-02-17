@@ -40,17 +40,8 @@ async function askReadCodebase(): Promise<boolean> {
 export async function discussCommand(topic: string): Promise<void> {
   const projectRoot = process.cwd();
 
-  // Load and validate config
-  let config;
-  try {
-    config = await loadConfig(projectRoot);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      console.log(chalk.red(error.message));
-      process.exit(1);
-    }
-    throw error;
-  }
+  // Load and validate config — errors propagate to index.ts
+  const config = await loadConfig(projectRoot);
 
   console.log(chalk.bold(`\n  Topic: "${topic}"\n`));
   console.log(chalk.dim("  Summoning the knights to the table...\n"));
@@ -59,17 +50,10 @@ export async function discussCommand(topic: string): Promise<void> {
   const adapters = await initializeAdapters(config);
 
   if (adapters.size === 0) {
-    console.log(
-      chalk.red(
-        "\n  A roundtable with no knights is just a table."
-      )
+    throw new ConfigError(
+      "A roundtable with no knights is just a table.",
+      { hint: "Install at least one AI CLI tool: claude, gemini, or codex" }
     );
-    console.log(
-      chalk.dim(
-        "  Install at least one AI CLI tool: claude, gemini, or codex"
-      )
-    );
-    process.exit(1);
   }
 
   const knightNames = Array.from(adapters.keys())

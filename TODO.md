@@ -28,6 +28,8 @@
   - [x] `roundtable chronicle`
   - [x] `roundtable list`
   - [x] `roundtable code-red "symptoms"` (diagnostic mode)
+  - [x] `roundtable decrees` (King's Decree Log)
+  - [x] `roundtable manifest` (implementation tracking)
 - [x] Orchestrator: round logic + turn management
 - [x] Consensus engine: score parsing + detection
 - [x] Diagnostic engine: convergence + fuzzy matching
@@ -61,7 +63,7 @@
 
 ## Phase 4: Polish & Release
 
-- [x] Error handling + graceful failures
+- [x] Error handling + graceful failures (centralized errors.ts)
 - [x] Interactive `init` wizard
 - [x] Terminal output (chalk/ora spinners, knight personalities)
 - [x] King's Choice flow (consensus → apply in one flow)
@@ -74,24 +76,61 @@
 
 ---
 
-## Future (Post-Release)
+## Phase 5: Safety & Integrity (added 17 feb 2026)
 
 ### Scoped Apply (knight consensus — session 1224)
-- [ ] Add `files_to_modify` to ConsensusBlock (required at score >= 9)
-- [ ] `NEW:path` prefix for new file creation
-- [ ] Light validation (warn) at consensus claim, hard fail at `apply`
-- [ ] Orchestrator scope enforcement — reject writes outside allowed list
-- [ ] `--override-scope` flag with confirmation + reason + audit log
-- [ ] Diff-mode output (v2, opt-in experiment)
+- [x] Add `files_to_modify` to ConsensusBlock (required at score >= 9)
+- [x] `NEW:path` prefix for new file creation
+- [x] Light validation (warn) at consensus claim, hard fail at `apply`
+- [x] Orchestrator scope enforcement — reject writes outside allowed list
+- [x] `--override-scope` flag with confirmation + reason + audit log
+- [ ] Diff-mode output (v2, opt-in experiment — RTDIFF/1 format designed)
 
-### Other
-- [ ] Tests (~40 cases, plan via consensus session)
+### Source Context Injection (session 1718)
+- [x] Read allowed_files content into apply prompt
+- [x] sha256 hash per file for integrity
+- [x] 150KB hard limit with actionable error
+- [x] 7 mandatory editing rules ("EDIT, DON'T REWRITE")
+
+### King's Decree Log (session 1620)
+- [x] decree-log.json append-only storage
+- [x] 3 event types: rejected_no_apply, deferred, override_scope
+- [x] Prompt injection (max 5 recent, revoked: false)
+- [x] `roundtable decrees` read-only command
+- [x] Log on "self"/"later" in discuss + on scope override in apply
+
+### Implementation Manifest
+- [x] manifest.json append-only storage
+- [x] `roundtable manifest list/add/deprecate/check` commands
+- [x] Manifest summary injected into knight system prompt
+- [x] Partial apply tracking (implemented vs partial)
+
+### Centralized Error Handling (session 1550)
+- [x] RoundtableError hierarchy (5 subclasses + exit codes 1-5, 99)
+- [x] Single `handleCliError()` in index.ts — only process.exit location
+- [x] classifyError mandatory in all adapters
+- [x] Hints for user-actionable error messages
+
+---
+
+## Open Issues
+
 - [ ] DRY refactor: parseConsensus duplication in base.ts + consensus.ts
-- [ ] Integrate `src/utils/hash.ts` (created by knight apply, unused)
+- [ ] Regex fallback for consensus JSON fails with nested braces
+- [ ] discuss.ts still has process.exit(1) — should use typed throws
+- [ ] Tests (~40 cases, plan via consensus session)
+
+---
+
+## Future (Post-Release)
+
 - [ ] VS Code extension
 - [ ] Web dashboard
 - [ ] More adapters (DeepSeek, Llama, Mistral)
 - [ ] CI/CD integration (GitHub Actions)
+- [ ] `@roundtable` code comments (file watcher / git hook)
+- [ ] Real-time streaming output
+- [ ] Auto-execute mode (with safeguards)
 
 ---
 

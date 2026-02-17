@@ -65,42 +65,109 @@ export function warnMissingScopeAtConsensus(block: ConsensusBlock): void {
 }
 
 /**
+ * Extract balanced JSON objects containing a required key.
+ * Handles nested braces correctly using a state machine parser.
+ */
+function extractBalancedJson(input: string, key: string): string[] {
+  const keyToken = `"${key}"`;
+  const candidates: string[] = [];
+
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') { inString = false; }
+      continue;
+    }
+
+    if (ch === '"') { inString = true; continue; }
+
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+      continue;
+    }
+
+    if (ch === "}") {
+      if (depth === 0) continue;
+      depth--;
+      if (depth === 0 && start >= 0) {
+        const candidate = input.slice(start, i + 1);
+        if (candidate.includes(keyToken)) {
+          candidates.push(candidate);
+        }
+        start = -1;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Parse a consensus JSON block from an LLM response string.
- * Tries multiple patterns: fenced code blocks, raw JSON objects.
+ * Tries fenced code blocks first, then balanced JSON extraction as fallback.
  */
 export function parseConsensusFromResponse(
   response: string,
   knightName: string,
   round: number
 ): ConsensusBlock | null {
-  const jsonPatterns = [
+  // Pattern 1 & 2: fenced code blocks (these work fine for most cases)
+  const fencedPatterns = [
     /```json\s*\n?([\s\S]*?)\n?\s*```/,
     /```\s*\n?([\s\S]*?)\n?\s*```/,
-    /(\{[^{}]*"consensus_score"\s*:[^{}]*\})/,
   ];
 
-  for (const pattern of jsonPatterns) {
+  for (const pattern of fencedPatterns) {
     const match = response.match(pattern);
     if (!match?.[1]) continue;
 
-    try {
-      const parsed = JSON.parse(match[1].trim());
-      if (typeof parsed.consensus_score === "number") {
-        return {
-          knight: parsed.knight || knightName,
-          round: parsed.round || round,
-          consensus_score: parsed.consensus_score,
-          agrees_with: Array.isArray(parsed.agrees_with) ? parsed.agrees_with : [],
-          pending_issues: Array.isArray(parsed.pending_issues) ? parsed.pending_issues : [],
-          proposal: parsed.proposal,
-          files_to_modify: validateFilesToModify(parsed.files_to_modify),
-        };
-      }
-    } catch {
-      // Try next pattern
-    }
+    const result = tryParseConsensus(match[1].trim(), knightName, round);
+    if (result) return result;
   }
 
+  // Fallback: balanced brace extraction (handles nested objects)
+  const candidates = extractBalancedJson(response, "consensus_score");
+  for (const candidate of candidates) {
+    const result = tryParseConsensus(candidate, knightName, round);
+    if (result) return result;
+  }
+
+  return null;
+}
+
+/**
+ * Try to parse a JSON string into a ConsensusBlock.
+ */
+function tryParseConsensus(
+  json: string,
+  knightName: string,
+  round: number
+): ConsensusBlock | null {
+  try {
+    const parsed = JSON.parse(json);
+    if (typeof parsed.consensus_score === "number") {
+      return {
+        knight: parsed.knight || knightName,
+        round: parsed.round || round,
+        consensus_score: parsed.consensus_score,
+        agrees_with: Array.isArray(parsed.agrees_with) ? parsed.agrees_with : [],
+        pending_issues: Array.isArray(parsed.pending_issues) ? parsed.pending_issues : [],
+        proposal: parsed.proposal,
+        files_to_modify: validateFilesToModify(parsed.files_to_modify),
+      };
+    }
+  } catch {
+    // Invalid JSON
+  }
   return null;
 }
 
@@ -209,42 +276,59 @@ export function parseDiagnosticFromResponse(
   knightName: string,
   round: number
 ): DiagnosticBlock | null {
-  const jsonPatterns = [
+  // Fenced code blocks first
+  const fencedPatterns = [
     /```json\s*\n?([\s\S]*?)\n?\s*```/,
     /```\s*\n?([\s\S]*?)\n?\s*```/,
-    /(\{[^{}]*"confidence_score"\s*:[\s\S]*?\})/,
   ];
 
-  for (const pattern of jsonPatterns) {
+  for (const pattern of fencedPatterns) {
     const match = response.match(pattern);
     if (!match?.[1]) continue;
 
-    let raw = match[1].trim();
-
-    // Try direct parse, then repaired parse
-    for (const attempt of [raw, repairJson(raw)]) {
-      try {
-        const parsed = JSON.parse(attempt);
-        if (typeof parsed.confidence_score === "number" && parsed.root_cause_key) {
-          const rootCauseKey = String(parsed.root_cause_key).toLowerCase().replace(/\s+/g, "-");
-          return {
-            knight: parsed.knight || knightName,
-            round: parsed.round || round,
-            confidence_score: Math.min(10, Math.max(0, parsed.confidence_score)),
-            root_cause_key: isValidRootCauseKey(rootCauseKey) ? rootCauseKey : "parse-error",
-            evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
-            rules_out: Array.isArray(parsed.rules_out) ? parsed.rules_out : [],
-            confirms: Array.isArray(parsed.confirms) ? parsed.confirms : [],
-            file_requests: Array.isArray(parsed.file_requests) ? parsed.file_requests.slice(0, 4) : [],
-            next_test: typeof parsed.next_test === "string" ? parsed.next_test : "",
-          };
-        }
-      } catch {
-        // Try next
-      }
-    }
+    const result = tryParseDiagnostic(match[1].trim(), knightName, round);
+    if (result) return result;
   }
 
+  // Fallback: balanced brace extraction (handles nested objects)
+  const candidates = extractBalancedJson(response, "confidence_score");
+  for (const candidate of candidates) {
+    const result = tryParseDiagnostic(candidate, knightName, round);
+    if (result) return result;
+  }
+
+  return null;
+}
+
+/**
+ * Try to parse a JSON string into a DiagnosticBlock.
+ */
+function tryParseDiagnostic(
+  json: string,
+  knightName: string,
+  round: number
+): DiagnosticBlock | null {
+  for (const attempt of [json, repairJson(json)]) {
+    try {
+      const parsed = JSON.parse(attempt);
+      if (typeof parsed.confidence_score === "number" && parsed.root_cause_key) {
+        const rootCauseKey = String(parsed.root_cause_key).toLowerCase().replace(/\s+/g, "-");
+        return {
+          knight: parsed.knight || knightName,
+          round: parsed.round || round,
+          confidence_score: Math.min(10, Math.max(0, parsed.confidence_score)),
+          root_cause_key: isValidRootCauseKey(rootCauseKey) ? rootCauseKey : "parse-error",
+          evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
+          rules_out: Array.isArray(parsed.rules_out) ? parsed.rules_out : [],
+          confirms: Array.isArray(parsed.confirms) ? parsed.confirms : [],
+          file_requests: Array.isArray(parsed.file_requests) ? parsed.file_requests.slice(0, 4) : [],
+          next_test: typeof parsed.next_test === "string" ? parsed.next_test : "",
+        };
+      }
+    } catch {
+      // Try next
+    }
+  }
   return null;
 }
 
