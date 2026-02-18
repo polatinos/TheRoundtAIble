@@ -156,6 +156,12 @@
 - [ ] Adapter fallback — CLI niet beschikbaar → valt terug naar API?
 - [ ] Extra LLMs toevoegen — Ollama (lokaal), DeepSeek, Mistral etc. via config testen
 - [ ] Custom adapter flow — kan een gebruiker makkelijk een nieuwe LLM toevoegen?
+- [x] `roundtable summon` — git diff review, knights worden opgeroepen
+- [x] `roundtable status` — toont laatste sessie info correct
+- [x] `roundtable chronicle` — laadt eerdere beslissingen
+- [x] `roundtable list` — 26 sessies, alle statussen correct
+- [x] `roundtable decrees` — decree log werkt
+- [x] `roundtable manifest list` — 5 features, alle knights als lead
 
 ### Code Quality
 - [ ] `hash.ts` integratie afronden (aangemaakt maar niet overal gebruikt)
