@@ -93,9 +93,10 @@ program
   .description("Apply the consensus decision (Lead Knight executes)")
   .option("--noparley", "Skip file confirmation — write everything directly (dangerous)")
   .option("--override-scope", "Bypass scope enforcement (requires confirmation and reason)")
-  .action(async (options: { noparley?: boolean; overrideScope?: boolean }) => {
+  .option("--dry-run", "Run full pipeline without writing files — show what would happen")
+  .action(async (options: { noparley?: boolean; overrideScope?: boolean; dryRun?: boolean }) => {
     try {
-      await applyCommand(options.noparley ?? false, options.overrideScope ?? false);
+      await applyCommand(options.noparley ?? false, options.overrideScope ?? false, options.dryRun ?? false);
     } catch (error) {
       handleCliError(error);
     }

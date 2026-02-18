@@ -133,8 +133,11 @@ async function buildSourceContextWithBlockMaps(
  * Modes:
  *   --parley (default) — shows each file, asks for confirmation
  *   --noparley — writes everything directly ("dangerous mode")
+ *   --dry-run — runs entire pipeline (including knight execution, parse,
+ *               stage, validate) but writes NOTHING to disk. Shows what
+ *               WOULD be written. Non-zero exit on validation/scope failures.
  */
-export async function applyCommand(initialNoparley = false, overrideScope = false): Promise<void> {
+export async function applyCommand(initialNoparley = false, overrideScope = false, dryRun = false): Promise<void> {
   let noparley = initialNoparley;
   const projectRoot = process.cwd();
 
@@ -158,7 +161,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     return;
   }
 
-  if (status.phase === "completed") {
+  if (status.phase === "completed" && !dryRun) {
     console.log(chalk.yellow("\n  Already applied. The deed is done."));
     console.log(chalk.dim(`  Session: ${session.name}\n`));
     return;
@@ -197,17 +200,23 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   const leadKnight = selectLeadKnight(config.knights, consensusBlocks);
 
   // Show decision summary
+  if (dryRun) {
+    console.log(chalk.bold.magenta("\n  DRY RUN — no files will be written.\n"));
+  }
   console.log(chalk.bold("\n  The council has spoken.\n"));
   console.log(chalk.dim(`  Session:     ${session.name}`));
   console.log(chalk.dim(`  Topic:       ${session.topic || "unknown"}`));
   console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}\n`));
 
-  // If noparley wasn't set via --noparley flag, ask the user
-  if (!noparley) {
+  // If noparley wasn't set via --noparley flag, ask the user (skip in dry-run)
+  if (!noparley && !dryRun) {
     noparley = await askParleyMode();
   }
 
-  if (noparley) {
+  if (dryRun) {
+    console.log(chalk.magenta(`  Mode:        DRY RUN`));
+    console.log(chalk.dim(`  Full pipeline, zero disk writes.\n`));
+  } else if (noparley) {
     console.log(chalk.red.bold(`  Mode:        NO PARLEY`));
     console.log(chalk.dim(`  No questions asked. Bold move.\n`));
   } else {
@@ -215,15 +224,19 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     console.log(chalk.dim(`  Each file will be shown for approval.\n`));
   }
 
-  // Update status to applying
-  await updateStatus(session.path, { phase: "applying" });
+  // Update status to applying (skip in dry-run)
+  if (!dryRun) {
+    await updateStatus(session.path, { phase: "applying" });
+  }
 
   // Initialize adapters and find the lead knight's adapter
   const adapters = await initializeAdapters(config);
   const adapter = adapters.get(leadKnight.adapter);
 
   if (!adapter) {
-    await updateStatus(session.path, { phase: "consensus_reached" });
+    if (!dryRun) {
+      await updateStatus(session.path, { phase: "consensus_reached" });
+    }
     throw new AdapterErr(leadKnight.adapter,
       `${leadKnight.name} didn't show up. Adapter "${leadKnight.adapter}" not available.`,
       { hint: "Install the required CLI tool or configure an API key." }
@@ -245,8 +258,8 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     console.log("");
   }
 
-  // Override scope flow: require explicit confirmation with reason
-  if (overrideScope && allowedFiles && allowedFiles.length > 0) {
+  // Override scope flow: require explicit confirmation with reason (skip in dry-run)
+  if (overrideScope && allowedFiles && allowedFiles.length > 0 && !dryRun) {
     console.log(chalk.red.bold("  SCOPE OVERRIDE requested."));
     console.log(chalk.yellow("  This bypasses the agreed file scope. All files will be written.\n"));
 
@@ -436,7 +449,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
   } catch (error) {
     spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
-    await updateStatus(session.path, { phase: "consensus_reached" });
+    if (!dryRun) {
+      await updateStatus(session.path, { phase: "consensus_reached" });
+    }
     throw error;
   }
 
@@ -452,6 +467,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   // --- PARSE + STAGE ---
   const staged = new Map<string, string>();
   const stageErrors: string[] = [];
+  let scopeViolationCount = 0;
 
   if (hasRtdiff) {
     // === NEW PATH: RTDIFF block operations ===
@@ -462,7 +478,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       console.log(chalk.dim("  Raw response (first 30 lines):"));
       const indented = result.split("\n").slice(0, 30).map(l => `  ${l}`).join("\n");
       console.log(chalk.dim(indented));
-      await updateStatus(session.path, { phase: "consensus_reached" });
+      if (!dryRun) {
+        await updateStatus(session.path, { phase: "consensus_reached" });
+      }
       return;
     }
 
@@ -483,6 +501,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
         });
         if (!inScope) {
           console.log(chalk.red(`  SCOPE VIOLATION: ${filePath} — blocked`));
+          scopeViolationCount++;
           opsByFile.delete(filePath);
         }
       }
@@ -531,6 +550,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     for (const rej of newFilesRejected) {
       console.log(chalk.red(`  SCOPE VIOLATION: ${rej.path} — blocked`));
+      scopeViolationCount++;
     }
 
     for (const nf of newFilesAllowed) {
@@ -546,7 +566,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       console.log(chalk.dim("  Raw response (first 30 lines):"));
       const indented = result.split("\n").slice(0, 30).map(l => `  ${l}`).join("\n");
       console.log(chalk.dim(indented));
-      await updateStatus(session.path, { phase: "consensus_reached" });
+      if (!dryRun) {
+        await updateStatus(session.path, { phase: "consensus_reached" });
+      }
       return;
     }
 
@@ -557,6 +579,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     const totalRejected = rejFiles.length + rejEdits.length;
     if (totalRejected > 0) {
+      scopeViolationCount += totalRejected;
       console.log(chalk.red.bold(`\n  SCOPE VIOLATION — ${totalRejected} file(s) blocked:`));
       for (const f of rejFiles) console.log(chalk.red(`    ${f.path}`));
       for (const e of rejEdits) console.log(chalk.red(`    ${e.path}`));
@@ -565,7 +588,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     if (files.length === 0 && edits.length === 0) {
       console.log(chalk.yellow("\n  All files were outside scope. Nothing to write."));
-      await updateStatus(session.path, { phase: "consensus_reached" });
+      if (!dryRun) {
+        await updateStatus(session.path, { phase: "consensus_reached" });
+      }
       return;
     }
 
@@ -607,7 +632,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
   if (staged.size === 0) {
     console.log(chalk.yellow("\n  Nothing to stage. All operations failed or no changes detected."));
-    await updateStatus(session.path, { phase: "consensus_reached" });
+    if (!dryRun) {
+      await updateStatus(session.path, { phase: "consensus_reached" });
+    }
     return;
   }
 
@@ -620,6 +647,14 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     spinnerVal.fail(chalk.red("  Validation FAILED"));
     const reportText = formatValidationReport(reports);
     console.log(reportText);
+
+    if (dryRun) {
+      console.log(chalk.red.bold("  DRY RUN — validation failed. Would NOT write any files."));
+      throw new SessionError("Dry run failed: validation errors detected.", {
+        hint: "Fix the decision or knight output and re-run.",
+      });
+    }
+
     console.log(chalk.red.bold("  The knight's output has validation errors. 0 files written."));
     console.log(chalk.dim("  Read the decision in .roundtable/sessions/*/decisions.md and apply manually,"));
     console.log(chalk.dim("  or re-run `roundtable apply` to try again.\n"));
@@ -628,6 +663,55 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   }
 
   spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
+
+  // --- DRY RUN REPORT: show what would be written, then exit ---
+  if (dryRun) {
+    console.log(chalk.bold.magenta(`\n  DRY RUN REPORT — ${staged.size} file(s) would be written:\n`));
+
+    for (const [filePath, content] of staged) {
+      const lines = content.split("\n").length;
+      const sizeKB = Math.round(content.length / 1024);
+      const isNewFile = !existsSync(resolve(projectRoot, filePath));
+
+      if (isNewFile) {
+        console.log(chalk.green(`    + ${filePath} (new, ${lines} lines, ${sizeKB}KB)`));
+      } else {
+        console.log(chalk.cyan(`    ~ ${filePath} (modified, ${lines} lines, ${sizeKB}KB)`));
+      }
+    }
+
+    console.log("");
+
+    // Gate summary
+    console.log(chalk.bold("  Gate results:"));
+    console.log(chalk.green(`    Validation:      PASSED (${staged.size} file(s))`));
+    if (scopeActive) {
+      if (scopeViolationCount > 0) {
+        console.log(chalk.red(`    Scope:           ${scopeViolationCount} violation(s) blocked`));
+      } else {
+        console.log(chalk.green(`    Scope:           PASSED (all files in scope)`));
+      }
+    } else {
+      console.log(chalk.dim(`    Scope:           disabled`));
+    }
+    if (stageErrors.length > 0) {
+      console.log(chalk.yellow(`    Staging:         ${stageErrors.length} error(s)`));
+    } else {
+      console.log(chalk.green(`    Staging:         PASSED (0 errors)`));
+    }
+
+    console.log(chalk.bold.magenta("\n  No files written. No backups. No manifest updates."));
+    console.log(chalk.dim("  Run without --dry-run to apply for real.\n"));
+
+    // Non-zero exit if there were scope violations or staging errors
+    if (scopeViolationCount > 0 || stageErrors.length > 0) {
+      throw new SessionError("Dry run completed with issues: scope violations or staging errors.", {
+        hint: `${scopeViolationCount} scope violation(s), ${stageErrors.length} staging error(s).`,
+      });
+    }
+
+    return;
+  }
 
   // --- WRITE: backup + atomic write ---
   const totalCount = staged.size;

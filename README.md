@@ -87,8 +87,9 @@ roundtable code-red "login page crashes on submit"
 | `roundtable init` | Interactive setup wizard — detects your AI tools |
 | `roundtable discuss "topic"` | Start a multi-AI discussion |
 | `roundtable summon` | Start a discussion based on your `git diff` |
-| `roundtable apply` | Execute the consensus decision (Lead Knight writes code) |
+| `roundtable apply` | Execute the consensus decision (Lead Knight writes code) — **BETA** |
 | `roundtable apply --noparley` | Execute without file-by-file review (dangerous) |
+| `roundtable apply --dry-run` | Run full pipeline without writing files — see what would happen |
 | `roundtable apply --override-scope` | Bypass file scope enforcement (requires reason) |
 | `roundtable code-red "symptoms"` | Emergency diagnostic mode — knights become doctors |
 | `roundtable manifest list` | Show all tracked features in the implementation manifest |
@@ -227,24 +228,23 @@ See [architecture-docs.md](architecture-docs.md) for the full technical architec
 
 ## Known Limitations
 
-### `roundtable apply` — unreliable on large files (>200 lines)
+### `roundtable apply` — BETA, use at own risk
 
-**Status:** Work in progress — USE AT OWN RISK
+`roundtable apply` works but is in beta. The block-level system (RTDIFF/1) lets knights target specific functions and classes instead of rewriting entire files, which solved the reliability issues with large files. Validation catches bad output before anything is written — your code is safe.
 
-When the Lead Knight needs to edit large files, the generated code edits may contain syntax errors (bracket imbalances, unclosed blocks). The validation pipeline will **block all bad output** — your code is safe, but the apply may fail to write anything.
+**What works:**
+- `roundtable discuss` — multi-AI discussions work reliably
+- `roundtable apply` — writes code via block-level operations (tested on 600+ line files)
+- `roundtable apply --dry-run` — test the full pipeline without writing anything
+- Validation pipeline — blocks bad output (157 tests, no corrupted files)
+- Scope enforcement + backup system
 
-**What works reliably:**
-- `roundtable discuss` — multi-AI discussions work great
-- `roundtable apply` on small files (<200 lines) — generally works
-- Validation pipeline — correctly blocks bad output (no corrupted files)
-- Scope enforcement — blocks out-of-scope writes
-- Backup system — creates backups before any write
+**Known risks:**
+- Output quality depends on the LLM — validation blocks bad code but nothing gets written
+- Single attempt, no retry — if the knight fails, you re-run or apply manually
+- More real-world testing needed
 
-**What doesn't work yet:**
-- `roundtable apply` on large files — knight output has bracket errors
-- Retry mechanism — experimental, may not fix the errors
-
-We're actively working on a better approach (per-function apply, smarter chunking). If apply fails, you can always read the consensus decision in `.roundtable/sessions/*/decisions.md` and apply it manually.
+If apply fails, read the decision in `.roundtable/sessions/*/decisions.md` and apply manually.
 
 ## License
 

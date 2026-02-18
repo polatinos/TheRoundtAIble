@@ -84,7 +84,7 @@
 - [x] Light validation (warn) at consensus claim, hard fail at `apply`
 - [x] Orchestrator scope enforcement — reject writes outside allowed list
 - [x] `--override-scope` flag with confirmation + reason + audit log
-- [ ] Diff-mode output (v2, opt-in experiment — RTDIFF/1 format designed)
+- [x] Block-level apply with RTDIFF/1 (block-scanner + diff-parser + BLOCK_MAP prompt)
 
 ### Source Context Injection (session 1718)
 - [x] Read allowed_files content into apply prompt
@@ -118,36 +118,28 @@
 - [x] DRY refactor: parseConsensus duplication in base.ts + consensus.ts (fixed session 18 feb)
 - [x] Regex fallback for consensus JSON fails with nested braces (fixed: balanced brace state machine)
 - [x] discuss.ts still has process.exit(1) — should use typed throws (fixed: ConfigError)
-- [ ] Tests (~40 cases, plan via consensus session)
-- [ ] 150KB source context limit too small for large projects — need diff-mode or increase
+- [~] Tests (157/157 passing — block-scanner 34, diff-parser 66, validation 57)
+- [x] 150KB source context limit — increased to 500KB + 80KB per-file truncation
 
-### Known Limitation: `roundtable apply` unreliable on large files (>200 lines)
+### `roundtable apply` — BETA (use at own risk)
 
-**Status:** Work in progress — USE AT OWN RISK
+**Status:** Working but beta — the block-level system fixed the large file problem.
 
-**Problem:** When the Lead Knight needs to edit large files (e.g. apply.ts at 600 lines), the EDIT: blocks consistently have bracket balance errors (missing `}`, extra `]`, unclosed `(`). The validation pipeline correctly blocks these bad edits (0 files written), but the knight cannot reliably produce clean output for large files.
+**What happened:** EDIT: search-and-replace was unreliable on large files. The knights designed a new block-level system (RTDIFF/1) in a roundtable discussion, which was implemented and tested. First successful apply on a 600+ line file.
 
 **What works:**
-- `roundtable discuss` — works reliably, knights produce good text output
-- `roundtable apply` on small files (<200 lines) — generally works
-- Validation pipeline — correctly blocks bad output (57/57 tests pass)
-- Scope enforcement — correctly blocks out-of-scope writes
+- `roundtable discuss` — works reliably
+- `roundtable apply` — works with new block-level system (BLOCK_REPLACE, BLOCK_INSERT_AFTER, BLOCK_DELETE)
+- `roundtable apply --dry-run` — test entire pipeline without writing
+- Validation pipeline — blocks bad output (157/157 tests pass)
+- Scope enforcement — blocks out-of-scope writes
 - Backup system — creates backups before any write
+- Legacy EDIT: format still supported (with deprecation warning)
 
-**What doesn't work yet:**
-- `roundtable apply` on large files — knight EDIT: output has bracket errors
-- Fix-call retry (sends broken code back to knight for targeted fix) — knight either makes the same errors or breaks character
-- Knights sometimes ignore EDIT: format and output plain code blocks
-
-**Current mitigations:**
-- Validation pipeline blocks ALL bad output (all-or-nothing)
-- Fix-call retry: up to 2 retries with broken code + specific errors (experimental)
-- `--disallowedTools` flag on Claude CLI prevents tool-use instead of text output
-
-**Planned solutions:**
-- Per-function apply (send only relevant functions, not entire files)
-- Smarter fix-call (smaller scope, only the broken section)
-- Better prompt engineering for EDIT: format compliance
+**Known risks:**
+- Knight output quality depends on the LLM — bad output is blocked by validation but nothing gets written
+- Single attempt only — no retry loop (hard fail > infinite retry)
+- Beta: more real-world testing needed
 
 ---
 
