@@ -316,36 +316,21 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     `You are ${leadKnight.name}, the Lead Knight chosen to implement the following decision.`,
     `Your capabilities: ${leadKnight.capabilities.join(", ")}`,
     ...scopeLines,
-    ...sourceContextLines,
-    "DECISION TO IMPLEMENT:",
-    "---",
-    decision,
-    "---",
     "",
-    "MANDATORY EDITING RULES (VIOLATION = REJECTED OUTPUT):",
-    "1. EDIT, DON'T REWRITE — only change what the decision requires.",
-    "2. KEEP all existing functionality intact — every import, export, function, type.",
-    "3. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
-    "4. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
+    "=== OUTPUT FORMAT (MANDATORY — READ THIS FIRST) ===",
     "",
-    "OUTPUT FORMAT — follow this EXACTLY:",
+    "Your ENTIRE response must consist of ONLY EDIT: and/or FILE: blocks.",
+    "No explanations, no commentary, no markdown headers, no plain code blocks.",
+    "If you output anything else, your response will be REJECTED.",
     "",
     "For EXISTING files, use EDIT: blocks with search-and-replace:",
     "",
     "EDIT: path/to/file.ts",
     "<<<< SEARCH",
-    "// exact lines from the source context to find",
+    "// exact lines to find (copy from source context below)",
     ">>>> REPLACE",
     "// replacement lines",
     "====",
-    "",
-    "Rules for EDIT: blocks:",
-    "- SEARCH must EXACTLY match text in the source context above (copy-paste, don't retype)",
-    "- Keep SEARCH blocks small: only the lines being changed + 1-2 context lines",
-    "- Multiple edits per file: repeat <<<< SEARCH / >>>> REPLACE / ==== under the same EDIT: header",
-    "- Edits are applied sequentially top-to-bottom",
-    "- To DELETE lines: use empty >>>> REPLACE section",
-    "- To INSERT lines: use a small SEARCH that matches where to insert, then include those lines + new lines in REPLACE",
     "",
     "For NEW files only, use FILE: blocks:",
     "",
@@ -354,23 +339,79 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     "// complete new file content",
     "```",
     "",
-    "General rules:",
-    "- Use EDIT: for existing files, FILE: for new files",
-    "- Do NOT output complete files for existing code — only the changes",
-    "- Do NOT ask for permission — just output the text",
-    "- Do NOT explain anything — ONLY output EDIT: and FILE: blocks",
-    "- No commentary, no questions, no tool usage — just the edits",
+    "EXAMPLE of correct output for editing 2 files:",
+    "",
+    "EDIT: src/index.ts",
+    "<<<< SEARCH",
+    "program.command('test')",
+    ">>>> REPLACE",
+    "program.command('test').option('--verbose', 'Show details')",
+    "====",
+    "",
+    "EDIT: src/commands/test.ts",
+    "<<<< SEARCH",
+    "export async function testCommand(): Promise<void> {",
+    ">>>> REPLACE",
+    "export async function testCommand(verbose = false): Promise<void> {",
+    "====",
+    "",
+    "Rules for EDIT: blocks:",
+    "- SEARCH must EXACTLY match text in the source context below (copy-paste, don't retype)",
+    "- Keep SEARCH blocks small: only the lines being changed + 1-2 context lines",
+    "- Multiple edits per file: repeat <<<< SEARCH / >>>> REPLACE / ==== under the same EDIT: header",
+    "- Edits are applied sequentially top-to-bottom",
+    "- To DELETE lines: use empty >>>> REPLACE section",
+    "- To INSERT lines: use a small SEARCH that matches where to insert, then include those lines + new lines in REPLACE",
+    "",
+    "MANDATORY EDITING RULES (VIOLATION = REJECTED OUTPUT):",
+    "1. EDIT, DON'T REWRITE — only change what the decision requires.",
+    "2. KEEP all existing functionality intact — every import, export, function, type.",
+    "3. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
+    "4. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
+    "5. Use EDIT: for existing files, FILE: for new files — NEVER output a complete existing file.",
+    "6. Do NOT use plain ``` code blocks — ONLY EDIT: and FILE: blocks.",
+    "",
+    "=== END OUTPUT FORMAT ===",
+    ...sourceContextLines,
+    "DECISION TO IMPLEMENT:",
+    "---",
+    decision,
+    "---",
+    "",
+    "REMINDER: Output ONLY EDIT: and FILE: blocks. No explanations. No plain code blocks.",
+    "Start your response with EDIT: or FILE: immediately.",
   ].join("\n");
 
-  // Execute
-  const spinner = ora(
-    chalk.cyan(`  ${leadKnight.name} unsheathes their keyboard...`)
-  ).start();
+  // Execute with retry loop — if validation fails, retry with error feedback
+  const MAX_RETRIES = 2;
+  const timeoutMs = config.rules.timeout_per_turn_seconds * 1000 * 3; // Triple timeout for execution
 
-  try {
-    const timeoutMs = config.rules.timeout_per_turn_seconds * 1000 * 3; // Triple timeout for execution
-    const result = await adapter.execute(executionPrompt, timeoutMs);
-    spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
+  let staged = new Map<string, string>();
+  let currentPrompt = executionPrompt;
+  let attempt = 0;
+  let succeeded = false;
+
+  while (attempt <= MAX_RETRIES) {
+    attempt++;
+    const isRetry = attempt > 1;
+
+    const spinner = ora(
+      chalk.cyan(isRetry
+        ? `  ${leadKnight.name} tries again (attempt ${attempt}/${MAX_RETRIES + 1})...`
+        : `  ${leadKnight.name} unsheathes their keyboard...`)
+    ).start();
+
+    let result: string;
+    try {
+      result = await adapter.execute(currentPrompt, timeoutMs);
+      spinner.succeed(chalk.cyan(isRetry
+        ? `  ${leadKnight.name} has reforged the code (attempt ${attempt})`
+        : `  ${leadKnight.name} has forged the code`));
+    } catch (error) {
+      spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      throw error;
+    }
 
     // --- PARSE: extract EDIT: and FILE: blocks ---
     const { files: allFiles, edits: allEdits } = parseKnightOutput(result);
@@ -420,7 +461,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     }
 
     // --- STAGE: build in-memory Map<path, content> ---
-    const staged = new Map<string, string>();
+    staged = new Map<string, string>();
     const stageErrors: string[] = [];
 
     // Stage FILE: blocks (new files) — content goes directly into map
@@ -477,61 +518,121 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     if (failedReports.length > 0) {
       spinnerVal.fail(chalk.red("  Validation FAILED"));
-      console.log(formatValidationReport(reports));
+      const reportText = formatValidationReport(reports);
+      console.log(reportText);
+
+      // --- FIX-CALL: send the broken code back with specific errors ---
+      if (attempt <= MAX_RETRIES) {
+        console.log(chalk.yellow(`  Sending broken code to knight for targeted fix (attempt ${attempt + 1}/${MAX_RETRIES + 1})...\n`));
+
+        // Build fix prompt: only the broken files + their specific errors
+        const fixBlocks: string[] = [
+          "CRITICAL: You are running in TEXT-ONLY output mode.",
+          "You CANNOT write files, use tools, or edit anything.",
+          "",
+          "Your previous code output had validation errors.",
+          "Below is the BROKEN code and the EXACT errors.",
+          "Your ONLY job: fix ONLY the listed errors. Change NOTHING else.",
+          "",
+        ];
+
+        for (const report of failedReports) {
+          const brokenContent = staged.get(report.path);
+          if (!brokenContent) continue;
+
+          fixBlocks.push(`=== BROKEN FILE: ${report.path} ===`);
+          fixBlocks.push(brokenContent);
+          fixBlocks.push(`=== END BROKEN FILE ===`);
+          fixBlocks.push("");
+          fixBlocks.push("ERRORS to fix:");
+          for (const issue of report.issues) {
+            const lineInfo = issue.line > 0 ? ` (line ${issue.line})` : "";
+            fixBlocks.push(`  - ${issue.type}${lineInfo}: ${issue.message}`);
+            if (issue.snippet) {
+              fixBlocks.push(`    > ${issue.snippet}`);
+            }
+          }
+          fixBlocks.push("");
+        }
+
+        fixBlocks.push(
+          "Output the COMPLETE fixed file(s) using FILE: blocks:",
+          "",
+          "FILE: path/to/file.ts",
+          "```typescript",
+          "// the entire corrected file content",
+          "```",
+          "",
+          "RULES:",
+          "- Output the COMPLETE file content, not EDIT: blocks",
+          "- Fix ONLY the listed errors — do NOT change anything else",
+          "- Ensure every { has a matching }, every [ has a ], every ( has a )",
+          "- Do NOT add commentary — ONLY FILE: blocks",
+        );
+
+        currentPrompt = fixBlocks.join("\n");
+        continue; // retry with fix prompt
+      }
+
+      // No retries left
+      console.log(chalk.red.bold("  All retries exhausted. The knight cannot produce clean code."));
       await updateStatus(session.path, { phase: "consensus_reached" });
       return;
     }
 
     spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
+    succeeded = true;
+    break; // validation passed, exit retry loop
+  }
 
-    // --- WRITE: backup + atomic write ---
-    const totalCount = staged.size;
-    console.log(chalk.bold(`\n  ${totalCount} file(s) ready to write:\n`));
-
-    let writeResult;
-    if (noparley) {
-      console.log(chalk.red("  No parley mode — writing all files directly.\n"));
-      writeResult = await writeStagedFiles(staged, projectRoot, session.name);
-    } else {
-      console.log(chalk.dim("  Let's review what the knight proposes:\n"));
-      writeResult = await writeStagedFilesWithConfirmation(staged, projectRoot, session.name);
-    }
-
-    // Update status + write manifest entry
-    if (writeResult.count > 0) {
-      await updateStatus(session.path, { phase: "completed" });
-
-      // Write manifest entry
-      const topic = session.topic || "unknown";
-      const featureId = topicToFeatureId(topic);
-      const featureSummary = await getFeatureSummary(session.path, topic);
-      const featureStatus: ManifestFeatureStatus =
-        writeResult.skippedPaths.length > 0 ? "partial" : "implemented";
-
-      await addManifestEntry(projectRoot, {
-        id: featureId,
-        session: session.name,
-        status: featureStatus,
-        files: writeResult.writtenPaths,
-        files_skipped: writeResult.skippedPaths.length > 0 ? writeResult.skippedPaths : undefined,
-        summary: featureSummary,
-        applied_at: new Date().toISOString(),
-        lead_knight: leadKnight.name,
-      });
-
-      console.log(
-        chalk.bold.green(`\n  ${writeResult.count} file(s) written. The decision has been executed.`)
-      );
-      console.log(chalk.dim(`  Manifest updated: ${featureId} [${featureStatus}]`));
-      console.log(chalk.dim(`  Backups saved to .roundtable/backups/${session.name}/`));
-      console.log(chalk.dim("  Review the changes before committing.\n"));
-    } else {
-      console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));
-      await updateStatus(session.path, { phase: "consensus_reached" });
-    }
-  } catch (error) {
-    spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
+  if (!succeeded) {
     await updateStatus(session.path, { phase: "consensus_reached" });
-    throw error; // Propagate to central handler in index.ts
+    return;
+  }
+
+  // --- WRITE: backup + atomic write ---
+  const totalCount = staged.size;
+  console.log(chalk.bold(`\n  ${totalCount} file(s) ready to write:\n`));
+
+  let writeResult;
+  if (noparley) {
+    console.log(chalk.red("  No parley mode — writing all files directly.\n"));
+    writeResult = await writeStagedFiles(staged, projectRoot, session.name);
+  } else {
+    console.log(chalk.dim("  Let's review what the knight proposes:\n"));
+    writeResult = await writeStagedFilesWithConfirmation(staged, projectRoot, session.name);
+  }
+
+  // Update status + write manifest entry
+  if (writeResult.count > 0) {
+    await updateStatus(session.path, { phase: "completed" });
+
+    // Write manifest entry
+    const topic = session.topic || "unknown";
+    const featureId = topicToFeatureId(topic);
+    const featureSummary = await getFeatureSummary(session.path, topic);
+    const featureStatus: ManifestFeatureStatus =
+      writeResult.skippedPaths.length > 0 ? "partial" : "implemented";
+
+    await addManifestEntry(projectRoot, {
+      id: featureId,
+      session: session.name,
+      status: featureStatus,
+      files: writeResult.writtenPaths,
+      files_skipped: writeResult.skippedPaths.length > 0 ? writeResult.skippedPaths : undefined,
+      summary: featureSummary,
+      applied_at: new Date().toISOString(),
+      lead_knight: leadKnight.name,
+    });
+
+    console.log(
+      chalk.bold.green(`\n  ${writeResult.count} file(s) written. The decision has been executed.`)
+    );
+    console.log(chalk.dim(`  Manifest updated: ${featureId} [${featureStatus}]`));
+    console.log(chalk.dim(`  Backups saved to .roundtable/backups/${session.name}/`));
+    console.log(chalk.dim("  Review the changes before committing.\n"));
+  } else {
+    console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));
+    await updateStatus(session.path, { phase: "consensus_reached" });
   }
 }

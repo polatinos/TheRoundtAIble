@@ -34,7 +34,11 @@ export class ClaudeCliAdapter extends BaseAdapter {
     delete env.CLAUDECODE;
 
     try {
-      const result = await execa(this.command, ["--print"], {
+      const result = await execa(this.command, [
+        "--print",
+        "--output-format", "text",
+        "--disallowedTools", "Edit,Write,Bash,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task",
+      ], {
         input: prompt,
         timeout,
         reject: false,
