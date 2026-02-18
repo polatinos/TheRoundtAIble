@@ -143,6 +143,27 @@
 
 ---
 
+## Phase 6: Testing & Hardening
+
+### Functionele Tests (handmatig)
+- [ ] Knight memory/chronicle — werkt context van eerdere sessies door in nieuwe discussies?
+- [ ] `roundtable code-red` — live test met echte symptomen, werkt diagnose flow?
+- [ ] `roundtable apply --no-parley` — skip per-bestand review, schrijft alles in één keer
+- [ ] `roundtable apply` live test — echte knight output, verify dat goede code WEL geschreven wordt
+- [ ] `roundtable apply` met opzettelijk kapotte knight output — blocked by validation?
+- [ ] GPT als lead knight — hertesten nu met 16K max_tokens
+- [ ] Chronicle memory — weten knights wat er eerder is besloten + wat nog open staat?
+- [ ] Adapter fallback — CLI niet beschikbaar → valt terug naar API?
+- [ ] Extra LLMs toevoegen — Ollama (lokaal), DeepSeek, Mistral etc. via config testen
+- [ ] Custom adapter flow — kan een gebruiker makkelijk een nieuwe LLM toevoegen?
+
+### Code Quality
+- [ ] `hash.ts` integratie afronden (aangemaakt maar niet overal gebruikt)
+- [ ] Extra unit tests voor edge cases (consensus parsing, malformed JSON, empty responses)
+- [ ] Error recovery — wat als adapter crasht mid-discussie? Graceful failure?
+
+---
+
 ## Future (Post-Release)
 
 - [ ] VS Code extension
