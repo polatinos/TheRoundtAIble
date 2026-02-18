@@ -225,6 +225,27 @@ See [architecture-docs.md](architecture-docs.md) for the full technical architec
 - [ ] More adapters (DeepSeek, Llama, Mistral)
 - [ ] CI/CD integration (GitHub Actions)
 
+## Known Limitations
+
+### `roundtable apply` — unreliable on large files (>200 lines)
+
+**Status:** Work in progress — USE AT OWN RISK
+
+When the Lead Knight needs to edit large files, the generated code edits may contain syntax errors (bracket imbalances, unclosed blocks). The validation pipeline will **block all bad output** — your code is safe, but the apply may fail to write anything.
+
+**What works reliably:**
+- `roundtable discuss` — multi-AI discussions work great
+- `roundtable apply` on small files (<200 lines) — generally works
+- Validation pipeline — correctly blocks bad output (no corrupted files)
+- Scope enforcement — blocks out-of-scope writes
+- Backup system — creates backups before any write
+
+**What doesn't work yet:**
+- `roundtable apply` on large files — knight output has bracket errors
+- Retry mechanism — experimental, may not fix the errors
+
+We're actively working on a better approach (per-function apply, smarter chunking). If apply fails, you can always read the consensus decision in `.roundtable/sessions/*/decisions.md` and apply it manually.
+
 ## License
 
 MIT — Tarik Polat ([polatinos](https://github.com/polatinos))

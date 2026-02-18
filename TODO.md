@@ -71,8 +71,8 @@
 - [x] .gitignore — no personal files in repo
 - [x] README.md with installation + quick start
 - [x] architecture-docs.md for public repo
-- [ ] npm package publish
-- [ ] GitHub first release
+- [x] npm package publish
+- [x] GitHub first release
 
 ---
 
