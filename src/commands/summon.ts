@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { loadConfig, ConfigError } from "../utils/config.js";
+import { loadConfig } from "../utils/config.js";
 import { getGitDiff, getGitBranch, getRecentCommits } from "../utils/git.js";
 import { discussCommand } from "./discuss.js";
 
@@ -10,16 +10,8 @@ import { discussCommand } from "./discuss.js";
 export async function summonCommand(): Promise<void> {
   const projectRoot = process.cwd();
 
-  // Validate config exists
-  try {
-    await loadConfig(projectRoot);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      console.log(chalk.red(error.message));
-      process.exit(1);
-    }
-    throw error;
-  }
+  // Validate config exists — errors propagate to index.ts
+  await loadConfig(projectRoot);
 
   console.log(chalk.dim("\n  Reading the git scrolls...\n"));
 

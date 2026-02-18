@@ -16,8 +16,8 @@ export class ClaudeCliAdapter extends BaseAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const result = await execa("where", [this.command], { reject: false });
-      return result.exitCode === 0;
+      await execa(this.command, ["--version"]);
+      return true;
     } catch {
       return false;
     }

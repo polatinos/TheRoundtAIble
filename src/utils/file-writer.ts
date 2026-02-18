@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import type { ParsedEdit } from "../types.js";
@@ -34,7 +34,7 @@ export function normalizeScopePath(path: string): string {
 export function isPathEscaping(filePath: string, projectRoot: string): boolean {
   const fullPath = resolve(projectRoot, filePath);
   const resolvedRoot = resolve(projectRoot);
-  return !fullPath.startsWith(resolvedRoot);
+  return fullPath !== resolvedRoot && !fullPath.startsWith(resolvedRoot + sep);
 }
 
 /**

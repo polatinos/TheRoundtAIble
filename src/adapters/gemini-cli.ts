@@ -27,15 +27,25 @@ export class GeminiCliAdapter extends BaseAdapter {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
     // --approval-mode plan = read-only mode (no tool execution).
-    // Requires experimental.plan=true in ~/.gemini/settings.json.
-    // Without this, Gemini enters agentic mode when it sees source code
-    // and tries to use tools (replace, write_file, etc.) which crash in piped mode.
+    // -e with empty string disables skills/extensions that cause conflicts.
+    // Gemini may still attempt tools in plan mode (exit_plan_mode, write_file)
+    // which get denied — so we accept output even on non-zero exit if stdout exists.
     try {
-      const result = await execa(this.command, ["-p", "", "--approval-mode", "plan"], {
+      const result = await execa(this.command, [
+        "-p", "",
+        "--approval-mode", "plan",
+        "-e", "",
+      ], {
         input: prompt,
         timeout,
         reject: false,
       });
+
+      // Gemini often exits non-zero due to tool denials in plan mode,
+      // but still produces valid output on stdout. Use it if available.
+      if (result.stdout && result.stdout.trim().length > 50) {
+        return result.stdout;
+      }
 
       if (result.exitCode !== 0) {
         const errorMsg = result.stderr || result.stdout || "Unknown error";

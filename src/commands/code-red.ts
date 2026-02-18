@@ -4,7 +4,7 @@ import { loadConfig, ConfigError } from "../utils/config.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { runDiagnosis } from "../orchestrator.js";
 import { getNextCodeRedId, appendToErrorLog, updateErrorLogEntry } from "../utils/error-log.js";
-import { askKingsDecree, askParleyMode } from "../utils/decree.js";
+import { askCodeRedDecree } from "../utils/decree.js";
 import { applyCommand } from "./apply.js";
 import type { DiagnosisResult } from "../types.js";
 
@@ -52,17 +52,8 @@ async function askReadCodebase(): Promise<boolean> {
 export async function codeRedCommand(symptoms: string): Promise<void> {
   const projectRoot = process.cwd();
 
-  // Load and validate config
-  let config;
-  try {
-    config = await loadConfig(projectRoot);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      console.log(chalk.red(error.message));
-      process.exit(1);
-    }
-    throw error;
-  }
+  // Load and validate config — errors propagate to index.ts
+  const config = await loadConfig(projectRoot);
 
   showBanner();
   console.log(chalk.bold(`  Symptoms: "${symptoms}"\n`));
@@ -71,8 +62,10 @@ export async function codeRedCommand(symptoms: string): Promise<void> {
   const adapters = await initializeAdapters(config);
 
   if (adapters.size === 0) {
-    console.log(chalk.red("\n  No doctors available. Install at least one AI CLI tool."));
-    process.exit(1);
+    throw new ConfigError(
+      "The hospital is empty. No doctors on call.",
+      { hint: "Install at least one AI CLI tool: claude, gemini, or codex" }
+    );
   }
 
   const doctorNames = Array.from(adapters.keys())
@@ -118,10 +111,10 @@ async function handleConverged(
   console.log(chalk.dim(`  Rounds:      ${result.rounds}`));
   console.log(chalk.dim(`  Session:     ${result.sessionPath}`));
 
-  const decree = await askKingsDecree("diagnosis");
+  const decree = await askCodeRedDecree();
 
-  if (decree === "knights") {
-    // Log to error log as OPEN, then fix
+  if (decree === "careful" || decree === "emergency") {
+    // Log to error log as OPEN, then operate
     await appendToErrorLog(projectRoot, {
       id: result.codeRedId,
       symptoms,
@@ -131,14 +124,21 @@ async function handleConverged(
       date: new Date().toISOString().slice(0, 10),
     });
 
-    const noparley = await askParleyMode("diagnosis");
-    await applyCommand(noparley);
-
-    // Update error log to RESOLVED
-    await updateErrorLogEntry(projectRoot, result.codeRedId, { status: "RESOLVED" });
-    console.log(chalk.green(`\n  ${result.codeRedId} marked as RESOLVED in the error log.`));
+    const noparley = decree === "emergency";
+    try {
+      const filesWritten = await applyCommand(noparley, false, false, true);
+      if (filesWritten > 0) {
+        await updateErrorLogEntry(projectRoot, result.codeRedId, { status: "RESOLVED" });
+        console.log(chalk.green(`\n  ${result.codeRedId} marked as RESOLVED in the error log.`));
+      } else {
+        console.log(chalk.yellow(`\n  Surgery produced no changes. ${result.codeRedId} remains OPEN.`));
+        console.log(chalk.dim(`  Run ${chalk.bold("roundtable apply")} to retry manually.\n`));
+      }
+    } catch {
+      console.log(chalk.yellow(`\n  Surgery failed. ${result.codeRedId} remains OPEN in the error log.`));
+      console.log(chalk.dim(`  Run ${chalk.bold("roundtable apply")} to retry manually.\n`));
+    }
   } else if (decree === "self") {
-    // Log and let the user handle it
     await appendToErrorLog(projectRoot, {
       id: result.codeRedId,
       symptoms,
@@ -152,7 +152,6 @@ async function handleConverged(
     console.log(chalk.dim(`  Read the diagnosis: ${result.sessionPath}/decisions.md`));
     console.log(chalk.dim(`  Error log updated: .roundtable/error-log.md\n`));
   } else {
-    // Log for later
     await appendToErrorLog(projectRoot, {
       id: result.codeRedId,
       symptoms,

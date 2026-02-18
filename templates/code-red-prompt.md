@@ -47,7 +47,7 @@ REGELS:
 
 {{error_log_context}}
 
-EERDER GEVRAAGDE BESTANDEN:
+BESCHIKBARE BRONCODE (codebase scan + eerder gevraagde bestanden):
 {{file_contents}}
 
 EERDERE DIAGNOSTISCHE RONDES:

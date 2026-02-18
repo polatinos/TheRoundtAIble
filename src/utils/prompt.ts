@@ -139,14 +139,19 @@ async function loadDiagnosticTemplate(): Promise<string> {
 /**
  * Get round-specific instruction for diagnostic mode.
  */
-export function getRoundInstruction(round: number, previousRounds: RoundEntry[]): string {
+export function getRoundInstruction(round: number, previousRounds: RoundEntry[], hasCodebase = false): string {
   if (round === 0) {
-    return [
+    const lines = [
       "TRIAGE RONDE:",
       "Dit is de eerste beoordeling. Lees de symptomen en het error log.",
-      "Geef je eerste inschatting. Welke richting wijzen de symptomen?",
-      "Vraag om specifieke bestanden die je nodig hebt.",
-    ].join("\n");
+    ];
+    if (hasCodebase) {
+      lines.push("De volledige broncode staat hieronder bij 'BESCHIKBARE BRONCODE'. Analyseer de relevante bestanden.");
+    } else {
+      lines.push("Geef je eerste inschatting. Welke richting wijzen de symptomen?");
+      lines.push("Vraag om specifieke bestanden die je nodig hebt.");
+    }
+    return lines.join("\n");
   }
 
   if (round === 1) {
@@ -232,8 +237,8 @@ export async function buildDiagnosticPrompt(
     .replace("{{other_knights}}", formatOtherKnights(knight, allKnights))
     .replace("{{symptoms}}", symptoms)
     .replace("{{personality}}", personality)
-    .replace("{{round_instruction}}", getRoundInstruction(round, previousRounds))
+    .replace("{{round_instruction}}", getRoundInstruction(round, previousRounds, fileContents.length > 100))
     .replace("{{error_log_context}}", errorLogContext ? `EERDERE CODE REDS:\n${errorLogContext}` : "")
-    .replace("{{file_contents}}", fileContents || "(Geen bestanden opgevraagd.)")
+    .replace("{{file_contents}}", fileContents || "(Geen broncode beschikbaar — vraag bestanden op via file_requests.)")
     .replace("{{previous_rounds}}", formatDiagnosticRounds(previousRounds, knight.name, round));
 }

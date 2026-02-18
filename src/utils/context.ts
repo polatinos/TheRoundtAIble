@@ -1,5 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import chalk from "chalk";
 import { readChronicle } from "./chronicle.js";
 import { getGitBranch, getGitDiff, getRecentCommits } from "./git.js";
 import type { RoundtableConfig } from "../types.js";
@@ -119,9 +120,13 @@ export async function readSourceFiles(
 
   const contents: string[] = [];
   let totalChars = 0;
+  let skippedFiles = 0;
 
   for (const file of sourceFiles) {
-    if (totalChars >= maxChars) break;
+    if (totalChars >= maxChars) {
+      skippedFiles++;
+      continue;
+    }
 
     try {
       const content = await readFile(join(projectRoot, file), "utf-8");
@@ -131,6 +136,13 @@ export async function readSourceFiles(
     } catch {
       // Skip unreadable
     }
+  }
+
+  if (skippedFiles > 0) {
+    const kb = Math.round(maxChars / 1024);
+    console.log(chalk.yellow(`\n  ⚔️  The scrolls overflow! ${skippedFiles} file(s) skipped — the knights can only carry ${kb}KB into battle.`));
+    console.log(chalk.dim(`  Tip: For large codebases, send a knight directly: ${chalk.bold("claude -p")} or ${chalk.bold("gemini -p")}`));
+    console.log(chalk.dim(`  Or narrow the scope with ignore patterns in .roundtable/config.json\n`));
   }
 
   return contents.join("\n\n");

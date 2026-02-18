@@ -137,7 +137,7 @@ async function buildSourceContextWithBlockMaps(
  *               stage, validate) but writes NOTHING to disk. Shows what
  *               WOULD be written. Non-zero exit on validation/scope failures.
  */
-export async function applyCommand(initialNoparley = false, overrideScope = false, dryRun = false): Promise<void> {
+export async function applyCommand(initialNoparley = false, overrideScope = false, dryRun = false, skipParleyPrompt = false): Promise<number> {
   let noparley = initialNoparley;
   const projectRoot = process.cwd();
 
@@ -158,13 +158,13 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     console.log(chalk.yellow("\n  No consensus in the latest session. The knights can't agree — what else is new."));
     console.log(chalk.dim(`  Session: ${session.name}`));
     console.log(chalk.dim(`  Phase: ${status?.phase || "unknown"}\n`));
-    return;
+    return 0;
   }
 
   if (status.phase === "completed" && !dryRun) {
     console.log(chalk.yellow("\n  Already applied. The deed is done."));
     console.log(chalk.dim(`  Session: ${session.name}\n`));
-    return;
+    return 0;
   }
 
   // Read decisions.md
@@ -208,8 +208,8 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   console.log(chalk.dim(`  Topic:       ${session.topic || "unknown"}`));
   console.log(chalk.cyan(`  Lead Knight: ${leadKnight.name}\n`));
 
-  // If noparley wasn't set via --noparley flag, ask the user (skip in dry-run)
-  if (!noparley && !dryRun) {
+  // If noparley wasn't set via flag/caller, ask the user (skip in dry-run, skip if caller already asked)
+  if (!noparley && !dryRun && !skipParleyPrompt) {
     noparley = await askParleyMode();
   }
 
@@ -269,7 +269,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     if (confirm.trim() !== "YES") {
       rl.close();
       console.log(chalk.dim("  Override cancelled. Scope enforcement remains active."));
-      return;
+      return 0;
     }
 
     const reason = await rl.question(chalk.yellow("  Reason for override: "));
@@ -277,7 +277,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     if (!reason.trim()) {
       console.log(chalk.red("  A reason is required for scope override. Cancelled."));
-      return;
+      return 0;
     }
 
     console.log(chalk.dim(`\n  Override logged: "${reason.trim()}"\n`));
@@ -481,7 +481,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       if (!dryRun) {
         await updateStatus(session.path, { phase: "consensus_reached" });
       }
-      return;
+      return 0;
     }
 
     // Group operations by file
@@ -509,7 +509,22 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     // Apply block operations per file
     for (const [filePath, ops] of opsByFile) {
-      const fullPath = resolve(projectRoot, filePath);
+      let resolvedPath = filePath;
+      let fullPath = resolve(projectRoot, filePath);
+
+      // Path matching: if file not found, try to match against allowed_files
+      // Knights sometimes abbreviate paths (e.g. "server.js" instead of "src/server.js")
+      if (!existsSync(fullPath) && allowedFiles && allowedFiles.length > 0) {
+        const match = allowedFiles.find((af) => {
+          const norm = normalizeScopePath(af.replace(/^NEW:/i, ""));
+          return norm.endsWith(`/${filePath}`) || norm.endsWith(`\\${filePath}`);
+        });
+        if (match) {
+          resolvedPath = normalizeScopePath(match.replace(/^NEW:/i, ""));
+          fullPath = resolve(projectRoot, resolvedPath);
+          console.log(chalk.dim(`  Path resolved: ${filePath} → ${resolvedPath}`));
+        }
+      }
 
       if (!existsSync(fullPath)) {
         stageErrors.push(`${filePath}: file not found (use FILE: for new files)`);
@@ -517,18 +532,18 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       }
 
       const originalContent = await readFile(fullPath, "utf-8");
-      const segments = fileSegments.get(filePath);
+      const segments = fileSegments.get(resolvedPath) || fileSegments.get(filePath);
 
       if (!segments || segments.length === 0) {
-        // Re-scan if not in cache (shouldn't happen, but safety first)
+        // Re-scan if not in cache (path was resolved or not scanned originally)
         const scanResult = scanBlocks(originalContent);
-        fileSegments.set(filePath, scanResult.segments);
+        fileSegments.set(resolvedPath, scanResult.segments);
       }
 
       const patchResult = applyBlockOperations(
         originalContent,
-        ops,
-        fileSegments.get(filePath)!
+        ops.map(op => ({ ...op, filePath: resolvedPath })),
+        fileSegments.get(resolvedPath) || fileSegments.get(filePath)!
       );
 
       if (!patchResult.success) {
@@ -537,7 +552,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       }
 
       if (patchResult.content && patchResult.content !== originalContent) {
-        staged.set(filePath, patchResult.content);
+        staged.set(resolvedPath, patchResult.content);
       }
     }
 
@@ -569,7 +584,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       if (!dryRun) {
         await updateStatus(session.path, { phase: "consensus_reached" });
       }
-      return;
+      return 0;
     }
 
     // Scope filter
@@ -591,7 +606,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       if (!dryRun) {
         await updateStatus(session.path, { phase: "consensus_reached" });
       }
-      return;
+      return 0;
     }
 
     // Stage FILE: blocks
@@ -601,7 +616,21 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
     // Stage EDIT: blocks
     for (const edit of edits) {
-      const fullPath = resolve(projectRoot, edit.path);
+      let editPath = edit.path;
+      let fullPath = resolve(projectRoot, editPath);
+
+      // Path matching for legacy edits too
+      if (!existsSync(fullPath) && allowedFiles && allowedFiles.length > 0) {
+        const match = allowedFiles.find((af) => {
+          const norm = normalizeScopePath(af.replace(/^NEW:/i, ""));
+          return norm.endsWith(`/${editPath}`) || norm.endsWith(`\\${editPath}`);
+        });
+        if (match) {
+          editPath = normalizeScopePath(match.replace(/^NEW:/i, ""));
+          fullPath = resolve(projectRoot, editPath);
+          console.log(chalk.dim(`  Path resolved: ${edit.path} → ${editPath}`));
+        }
+      }
 
       if (!existsSync(fullPath)) {
         stageErrors.push(`${edit.path}: file not found (use FILE: for new files)`);
@@ -635,7 +664,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     if (!dryRun) {
       await updateStatus(session.path, { phase: "consensus_reached" });
     }
-    return;
+    return 0;
   }
 
   // --- VALIDATE: run all checks on staged content ---
@@ -659,7 +688,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     console.log(chalk.dim("  Read the decision in .roundtable/sessions/*/decisions.md and apply manually,"));
     console.log(chalk.dim("  or re-run `roundtable apply` to try again.\n"));
     await updateStatus(session.path, { phase: "consensus_reached" });
-    return;
+    return 0;
   }
 
   spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
@@ -710,7 +739,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       });
     }
 
-    return;
+    return 0;
   }
 
   // --- WRITE: backup + atomic write ---
@@ -754,8 +783,10 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     console.log(chalk.dim(`  Manifest updated: ${featureId} [${featureStatus}]`));
     console.log(chalk.dim(`  Backups saved to .roundtable/backups/${session.name}/`));
     console.log(chalk.dim("  Review the changes before committing.\n"));
+    return writeResult.count;
   } else {
     console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));
     await updateStatus(session.path, { phase: "consensus_reached" });
+    return 0;
   }
 }

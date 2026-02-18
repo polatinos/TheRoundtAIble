@@ -28,14 +28,43 @@ const DEFAULT_DECREE_LABELS: DecreeLabels = {
 
 const CODE_RED_DECREE_LABELS: DecreeLabels = {
   title: "What is your order, Commander?",
-  option1Label: "Fix now",
-  option1Desc: "the doctors operate immediately",
+  option1Label: "Careful surgery",
+  option1Desc: "operate now, review each incision",
   option2Label: "Report only",
   option2Desc: "write the diagnosis, I'll handle the surgery",
   option3Label: "Log for later",
   option3Desc: "park it in the error log",
   prompt: "Commander? [1/2/3] ",
 };
+
+export type CodeRedDecree = "careful" | "emergency" | "self" | "later";
+
+/**
+ * Code-red specific decree — 4 options, parley baked in. No second question.
+ * Returns: "careful" (parley) | "emergency" (no parley) | "self" | "later"
+ */
+export async function askCodeRedDecree(): Promise<CodeRedDecree> {
+  console.log(chalk.bold("\n  What is your order, Commander?\n"));
+  console.log(`  ${chalk.bold("1.")} ${chalk.green("Careful surgery")} — review each incision before writing`);
+  console.log(`  ${chalk.bold("2.")} ${chalk.red("Emergency surgery")} — write everything, no anesthesia`);
+  console.log(`  ${chalk.bold("3.")} ${chalk.cyan("Report only")} — I'll handle the surgery myself`);
+  console.log(`  ${chalk.bold("4.")} ${chalk.dim("Log for later")} — park it in the error log\n`);
+
+  const r = rl();
+  const answer = await r.question(chalk.bold.yellow("  Commander? [1/2/3/4] "));
+  r.close();
+
+  const choice = answer.trim();
+  if (choice === "2") {
+    console.log(chalk.red("\n  Emergency surgery. No time to waste.\n"));
+    return "emergency";
+  }
+  if (choice === "3") return "self";
+  if (choice === "4") return "later";
+
+  console.log(chalk.green("\n  Careful surgery. Each incision will be reviewed.\n"));
+  return "careful";
+}
 
 /**
  * Ask the King/Commander what to do with the decision.

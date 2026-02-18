@@ -147,9 +147,9 @@
 
 ### Functionele Tests (handmatig)
 - [ ] Knight memory/chronicle — werkt context van eerdere sessies door in nieuwe discussies?
-- [ ] `roundtable code-red` — live test met echte symptomen, werkt diagnose flow?
-- [ ] `roundtable apply --no-parley` — skip per-bestand review, schrijft alles in één keer
-- [ ] `roundtable apply` live test — echte knight output, verify dat goede code WEL geschreven wordt
+- [x] `roundtable code-red` — live test met echte symptomen, werkt diagnose flow?
+- [x] `roundtable apply --no-parley` — skip per-bestand review, schrijft alles in één keer
+- [x] `roundtable apply` live test — echte knight output, verify dat goede code WEL geschreven wordt
 - [ ] `roundtable apply` met opzettelijk kapotte knight output — blocked by validation?
 - [ ] GPT als lead knight — hertesten nu met 16K max_tokens
 - [ ] Chronicle memory — weten knights wat er eerder is besloten + wat nog open staat?
@@ -166,6 +166,20 @@
 
 ## Future (Post-Release)
 
+### Lessons from CCB (claude_code_bridge) — feb 2026
+*Bron: github.com/bfly123/claude_code_bridge — complementaire tool, geen concurrent*
+
+**v1.1 (low-risk, na tests af):**
+- [ ] Consensus markers (`---ROUNDTABLE_CONSENSUS_BEGIN/END---`) als extra anchor boven huidige balanced-brace parser (fallback blijft, niet vervangen)
+- [ ] APPLY_COMPLETE marker — orchestrator kapt output af na marker, bespaart tokens
+- [ ] Context samenvatting voor rondes — tool outputs/code blocks comprimeren voordat ze naar volgende knight gaan (minder tokens per ronde)
+- [ ] Stale lock detection — PID-based check op `state.json` zodat crashed sessies niet locken
+
+**v2 (grotere wijzigingen):**
+- [ ] Session log reading als fallback — Claude's `.jsonl` logs lezen als stdout capture faalt (crash recovery)
+- [ ] Daemon/worker pool architectuur — voor parallel knight queries en real-time streaming
+
+### Existing ideas
 - [ ] VS Code extension
 - [ ] Web dashboard
 - [ ] More adapters (DeepSeek, Llama, Mistral)
@@ -175,5 +189,18 @@
 - [ ] Auto-execute mode (with safeguards)
 
 ---
+
+### Bugs gevonden & gefixed in sessie 18 feb #5
+- [x] process.exit(1) in summon.ts, chronicle.ts, code-red.ts → throw/propagate pattern
+- [x] claude-cli.ts `where` (Windows-only) → `--version` (cross-platform)
+- [x] file-writer.ts path prefix collision (`startsWith(root)` → `startsWith(root + sep)`)
+- [x] orchestrator.ts display regex `[^{}]*` → balanced brace `stripConsensusJson`
+- [x] gemini-cli.ts crash in plan mode → `-e ""` flag + accept stdout on non-zero exit
+- [x] code-red double question (decree + parley) → 4-option decree, no second question
+- [x] code-red false RESOLVED (applyCommand returns count, 0 = not resolved)
+- [x] code-red missing allowed_files in status.json → collect from diagnostic file_requests
+- [x] apply.ts path matching for abbreviated knight paths
+- [x] code-red-prompt.md misleading header → "BESCHIKBARE BRONCODE"
+- [x] prompt.ts triage instruction ignores codebase → hasCodebase flag
 
 *Last updated: 18 feb 2026*

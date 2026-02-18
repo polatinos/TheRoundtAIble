@@ -28,6 +28,41 @@ import { readErrorLog } from "./utils/error-log.js";
 import { readDecreeLog, getActiveDecrees, formatDecreesForPrompt } from "./utils/decree-log.js";
 
 /**
+ * Strip JSON blocks containing a specific key from a response string.
+ * Handles both fenced code blocks and bare JSON with balanced braces.
+ */
+function stripConsensusJson(text: string, key: string): string {
+  // First: strip fenced ```json ... ``` blocks
+  let result = text.replace(/```json[\s\S]*?```/g, "");
+
+  // Second: strip bare JSON containing the key using balanced brace matching
+  const keyIdx = result.indexOf(`"${key}"`);
+  if (keyIdx === -1) return result;
+
+  // Find the opening brace before the key
+  let openIdx = -1;
+  for (let i = keyIdx - 1; i >= 0; i--) {
+    if (result[i] === "{") { openIdx = i; break; }
+  }
+  if (openIdx === -1) return result;
+
+  // Walk forward with balanced braces
+  let depth = 0;
+  for (let i = openIdx; i < result.length; i++) {
+    if (result[i] === "{") depth++;
+    else if (result[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        result = result.slice(0, openIdx) + result.slice(i + 1);
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * Select the Lead Knight based on capabilities matching the topic.
  * Falls back to highest priority knight.
  */
@@ -245,9 +280,7 @@ export async function runDiscussion(
         console.log(divider);
 
         // Strip JSON consensus block from display
-        const displayResponse = response
-          .replace(/```json[\s\S]*?```/g, "")
-          .replace(/\{[^{}]*"consensus_score"[^{}]*\}/g, "")
+        const displayResponse = stripConsensusJson(response, "consensus_score")
           .trim();
 
         // Indent each line for readability
@@ -652,9 +685,7 @@ export async function runDiagnosis(
         console.log(chalk.red(`  Dr. ${knight.name}`) + chalk.dim(` (Round ${round})`));
         console.log(divider);
 
-        const displayResponse = response
-          .replace(/```json[\s\S]*?```/g, "")
-          .replace(/\{[^{}]*"confidence_score"[\s\S]*?\}/g, "")
+        const displayResponse = stripConsensusJson(response, "confidence_score")
           .trim();
 
         const indented = displayResponse
@@ -727,11 +758,23 @@ export async function runDiagnosis(
         .filter((r) => r.knight === bestDiag?.knight)
         .pop()?.response || "No detailed description available.";
 
+      // Collect allowed files from all diagnostic file_requests
+      const diagAllowedFiles = new Set<string>();
+      for (const r of allRounds) {
+        if (r.diagnostic?.file_requests) {
+          for (const f of r.diagnostic.file_requests) {
+            // Strip line ranges (e.g. "src/server.js:10-50" → "src/server.js")
+            diagAllowedFiles.add(f.split(":")[0]);
+          }
+        }
+      }
+
       await writeDecisions(sessionPath, `CODE-RED: ${symptoms}`, rootCauseDescription, allRounds);
       await updateStatus(sessionPath, {
         phase: "diagnosis_converged",
         consensus_reached: true,
         round,
+        allowed_files: diagAllowedFiles.size > 0 ? [...diagAllowedFiles] : undefined,
       });
 
       return {

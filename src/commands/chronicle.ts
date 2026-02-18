@@ -18,9 +18,8 @@ export async function chronicleCommand(): Promise<void> {
     // If config doesn't exist, still try default path
     if (error instanceof ConfigError && error.message.includes("not found")) {
       // Use default path
-    } else if (error instanceof ConfigError) {
-      console.log(chalk.red(error.message));
-      process.exit(1);
+    } else {
+      throw error;
     }
   }
 
