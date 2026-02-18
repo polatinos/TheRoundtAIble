@@ -204,6 +204,54 @@ export interface ParsedKnightOutput {
   edits: ParsedEdit[];
 }
 
+// --- Block Scanner types ---
+
+export type SegmentKind = "preamble" | "function" | "class" | "class_method" | "gap";
+
+export interface SegmentInfo {
+  /** Stable segment key: "preamble", "fn:runDiscussion", "class:Orchestrator", "class:Orchestrator#constructor", "gap:1" */
+  key: string;
+  kind: SegmentKind;
+  startLine: number; // 1-indexed
+  endLine: number;   // 1-indexed, inclusive
+  name?: string;
+  className?: string;
+}
+
+export interface ScanResult {
+  segments: SegmentInfo[];
+  /** Line number where preamble ends (0 if no preamble) */
+  preambleEnd: number;
+}
+
+// --- RTDIFF Block Operation types ---
+
+export type BlockOpType =
+  | "BLOCK_REPLACE"
+  | "BLOCK_INSERT_AFTER"
+  | "BLOCK_DELETE"
+  | "PREAMBLE_REPLACE";
+
+export interface BlockOperation {
+  type: BlockOpType;
+  filePath: string;
+  segmentKey: string; // e.g., "fn:writeFiles", "class:Orchestrator#run", "gap:1", "preamble"
+  content?: string;   // new content (not needed for DELETE)
+}
+
+export interface ParsedRtdiff {
+  operations: BlockOperation[];
+  /** FILE: blocks for new files */
+  newFiles: Array<{ path: string; content: string }>;
+}
+
+export interface PatchResult {
+  path: string;
+  success: boolean;
+  content?: string;
+  error?: string;
+}
+
 // --- File change types ---
 
 export interface FileChange {

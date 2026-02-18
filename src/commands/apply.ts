@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "../utils/config.js";
-import { SessionError, AdapterError as AdapterErr, ValidationError } from "../utils/errors.js";
+import { SessionError, AdapterError as AdapterErr } from "../utils/errors.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { findLatestSession, updateStatus } from "../utils/session.js";
 import { selectLeadKnight } from "../orchestrator.js";
@@ -14,6 +14,8 @@ import {
   writeStagedFiles,
   writeStagedFilesWithConfirmation,
 } from "../utils/file-writer.js";
+import { scanBlocks, generateBlockMap } from "../utils/block-scanner.js";
+import { parseRtdiff, applyBlockOperations, isRtdiffResponse, isLegacyEditResponse } from "../utils/diff-parser.js";
 import { parseKnightOutput } from "../utils/edit-parser.js";
 import { applyEdits } from "../utils/edit-parser.js";
 import { validateAll, formatValidationReport } from "../utils/validation.js";
@@ -21,12 +23,11 @@ import { askParleyMode } from "../utils/decree.js";
 import { addManifestEntry, topicToFeatureId, getFeatureSummary } from "../utils/manifest.js";
 import { addDecreeEntry } from "../utils/decree-log.js";
 import { hashContent } from "../utils/hash.js";
-import type { ConsensusBlock, ManifestFeatureStatus } from "../types.js";
+import type { ConsensusBlock, ManifestFeatureStatus, SegmentInfo } from "../types.js";
 import { createInterface } from "node:readline/promises";
 
 /**
  * Maximum total characters of source context to inject.
- * With EDIT format, output is much smaller so we can afford more input.
  */
 const MAX_SOURCE_CONTEXT_CHARS = 500_000;
 
@@ -36,15 +37,22 @@ const MAX_SOURCE_CONTEXT_CHARS = 500_000;
 const MAX_SINGLE_FILE_CHARS = 80_000;
 
 /**
- * Read all existing allowed_files and build a source context string.
- * Skips NEW: files (they don't exist yet).
- * Truncates oversized files with a warning.
+ * Read all existing allowed_files, build source context, and scan for blocks.
+ * Returns source context string + per-file block maps.
  */
-async function buildSourceContext(
+async function buildSourceContextWithBlockMaps(
   allowedFiles: string[],
   projectRoot: string
-): Promise<{ context: string; totalChars: number; fileCount: number }> {
+): Promise<{
+  context: string;
+  blockMaps: string;
+  totalChars: number;
+  fileCount: number;
+  fileSegments: Map<string, SegmentInfo[]>;
+}> {
   const blocks: string[] = [];
+  const mapBlocks: string[] = [];
+  const fileSegments = new Map<string, SegmentInfo[]>();
   let totalChars = 0;
   let fileCount = 0;
 
@@ -74,6 +82,14 @@ async function buildSourceContext(
         truncNote = ` (TRUNCATED: ${originalKB}KB -> ${limitKB}KB)`;
       }
 
+      // Scan for blocks
+      const scanResult = scanBlocks(content);
+      fileSegments.set(normalized, scanResult.segments);
+
+      // Generate block map
+      const blockMap = generateBlockMap(normalized, scanResult.segments);
+      mapBlocks.push(blockMap);
+
       const block = [
         `=== SOURCE: ${normalized} (hash: ${hash})${truncNote} ===`,
         content,
@@ -93,8 +109,10 @@ async function buildSourceContext(
 
   return {
     context: blocks.join("\n\n"),
+    blockMaps: mapBlocks.join("\n\n"),
     totalChars,
     fileCount,
+    fileSegments,
   };
 }
 
@@ -102,8 +120,15 @@ async function buildSourceContext(
  * The `roundtable apply` command.
  * Reads the latest session's decision and executes it via the Lead Knight.
  *
- * Pipeline: parse → stage (in-memory) → validate → backup → write
- * Any validation failure = 0 files written (all-or-nothing).
+ * Pipeline (v1.1 — block-level operations):
+ *   1. Scan source files → segment map
+ *   2. Build BLOCK_MAP + source context for knight prompt
+ *   3. Knight produces RTDIFF/1 BLOCK_* operations
+ *   4. Parse → resolve segment keys → patch atomically
+ *   5. Validate (bracket balance, artifacts, duplicate imports)
+ *   6. Backup → write (all-or-nothing)
+ *
+ * No retry loop — if the knight fails, it fails. Hard fail > infinite retry.
  *
  * Modes:
  *   --parley (default) — shows each file, asks for confirmation
@@ -151,14 +176,14 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
   // Read discussion to get consensus blocks for Lead Knight selection
   const discussionPath = join(session.path, "discussion.md");
-  let blocks: ConsensusBlock[] = [];
+  let consensusBlocks: ConsensusBlock[] = [];
   if (existsSync(discussionPath)) {
     const discussion = await readFile(discussionPath, "utf-8");
     const scoreMatches = discussion.matchAll(
       /## Round (\d+) — (\w+)[\s\S]*?Score: (\d+)\/10/g
     );
     for (const match of scoreMatches) {
-      blocks.push({
+      consensusBlocks.push({
         knight: match[2],
         round: parseInt(match[1]),
         consensus_score: parseInt(match[3]),
@@ -169,7 +194,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
   }
 
   // Select Lead Knight
-  const leadKnight = selectLeadKnight(config.knights, blocks);
+  const leadKnight = selectLeadKnight(config.knights, consensusBlocks);
 
   // Show decision summary
   console.log(chalk.bold("\n  The council has spoken.\n"));
@@ -266,27 +291,29 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     );
   }
 
-  // Build source context: read existing files so the knight sees current code
+  // Build source context with block maps
   let sourceContextBlock = "";
+  let blockMapsBlock = "";
+  let fileSegments = new Map<string, SegmentInfo[]>();
+
   if (allowedFiles && allowedFiles.length > 0) {
-    const spinner2 = ora(chalk.dim("  Reading source files for context...")).start();
-    const { context, totalChars, fileCount } = await buildSourceContext(allowedFiles, projectRoot);
-    spinner2.succeed(chalk.dim(`  ${fileCount} source file(s) loaded (${Math.round(totalChars / 1024)}KB)`));
+    const spinner2 = ora(chalk.dim("  Scanning source files + building block maps...")).start();
+    const result = await buildSourceContextWithBlockMaps(allowedFiles, projectRoot);
+    sourceContextBlock = result.context;
+    blockMapsBlock = result.blockMaps;
+    fileSegments = result.fileSegments;
+    spinner2.succeed(chalk.dim(`  ${result.fileCount} file(s) scanned (${Math.round(result.totalChars / 1024)}KB, ${fileSegments.size} block map(s))`));
 
     // Hard fail on token overflow
-    if (totalChars > MAX_SOURCE_CONTEXT_CHARS) {
+    if (result.totalChars > MAX_SOURCE_CONTEXT_CHARS) {
       throw new SessionError(
-        `Source context too large: ${Math.round(totalChars / 1024)}KB exceeds ${Math.round(MAX_SOURCE_CONTEXT_CHARS / 1024)}KB limit.`,
-        {
-          hint: "Reduce the scope (fewer allowed_files) or split into smaller apply sessions.",
-        }
+        `Source context too large: ${Math.round(result.totalChars / 1024)}KB exceeds ${Math.round(MAX_SOURCE_CONTEXT_CHARS / 1024)}KB limit.`,
+        { hint: "Reduce the scope (fewer allowed_files) or split into smaller apply sessions." }
       );
     }
-
-    sourceContextBlock = context;
   }
 
-  // Build execution prompt with EDIT format instructions
+  // Build execution prompt with BLOCK_* format instructions
   const scopeLines = scopeActive
     ? [
         "",
@@ -297,13 +324,26 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       ]
     : [];
 
+  const blockMapLines = blockMapsBlock
+    ? [
+        "",
+        "=== BLOCK MAPS (file structure — use these segment keys in your operations) ===",
+        "",
+        blockMapsBlock,
+        "",
+        "=== END BLOCK MAPS ===",
+        "",
+      ]
+    : [];
+
   const sourceContextLines = sourceContextBlock
     ? [
         "",
-        "CURRENT SOURCE CODE — This is the EXISTING code in each file.",
-        "You MUST use this as your base. DO NOT rewrite from memory.",
+        "=== CURRENT SOURCE CODE ===",
         "",
         sourceContextBlock,
+        "",
+        "=== END SOURCE CODE ===",
         "",
       ]
     : [];
@@ -319,124 +359,198 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     "",
     "=== OUTPUT FORMAT (MANDATORY — READ THIS FIRST) ===",
     "",
-    "Your ENTIRE response must consist of ONLY EDIT: and/or FILE: blocks.",
-    "No explanations, no commentary, no markdown headers, no plain code blocks.",
-    "If you output anything else, your response will be REJECTED.",
+    "Use BLOCK operations to modify existing files. Each operation targets a named segment",
+    "from the BLOCK MAP below. Do NOT use EDIT: search-and-replace blocks.",
     "",
-    "For EXISTING files, use EDIT: blocks with search-and-replace:",
+    "OPERATIONS:",
     "",
-    "EDIT: path/to/file.ts",
-    "<<<< SEARCH",
-    "// exact lines to find (copy from source context below)",
-    ">>>> REPLACE",
-    "// replacement lines",
-    "====",
+    "1. BLOCK_REPLACE — replace an entire segment with new content:",
     "",
-    "For NEW files only, use FILE: blocks:",
+    "   BLOCK_REPLACE: src/utils/file-writer.ts :: fn:writeFiles",
+    "   ---",
+    "   export async function writeFiles(staged: Map<string, string>): Promise<void> {",
+    "     // new implementation here",
+    "   }",
+    "   ---",
     "",
-    "FILE: path/to/new-file.ts",
-    "```typescript",
-    "// complete new file content",
-    "```",
+    "2. BLOCK_INSERT_AFTER — insert new code after a segment:",
     "",
-    "EXAMPLE of correct output for editing 2 files:",
+    "   BLOCK_INSERT_AFTER: src/orchestrator.ts :: fn:runDiscussion",
+    "   ---",
+    "   function newHelper(): void {",
+    "     // new function",
+    "   }",
+    "   ---",
     "",
-    "EDIT: src/index.ts",
-    "<<<< SEARCH",
-    "program.command('test')",
-    ">>>> REPLACE",
-    "program.command('test').option('--verbose', 'Show details')",
-    "====",
+    "3. BLOCK_DELETE — remove an entire segment:",
     "",
-    "EDIT: src/commands/test.ts",
-    "<<<< SEARCH",
-    "export async function testCommand(): Promise<void> {",
-    ">>>> REPLACE",
-    "export async function testCommand(verbose = false): Promise<void> {",
-    "====",
+    "   BLOCK_DELETE: src/utils/old.ts :: fn:deprecatedFunction",
     "",
-    "Rules for EDIT: blocks:",
-    "- SEARCH must EXACTLY match text in the source context below (copy-paste, don't retype)",
-    "- Keep SEARCH blocks small: only the lines being changed + 1-2 context lines",
-    "- Multiple edits per file: repeat <<<< SEARCH / >>>> REPLACE / ==== under the same EDIT: header",
-    "- Edits are applied sequentially top-to-bottom",
-    "- To DELETE lines: use empty >>>> REPLACE section",
-    "- To INSERT lines: use a small SEARCH that matches where to insert, then include those lines + new lines in REPLACE",
+    "4. PREAMBLE_REPLACE — replace imports and top-level code before first function/class:",
     "",
-    "MANDATORY EDITING RULES (VIOLATION = REJECTED OUTPUT):",
-    "1. EDIT, DON'T REWRITE — only change what the decision requires.",
-    "2. KEEP all existing functionality intact — every import, export, function, type.",
-    "3. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
-    "4. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
-    "5. Use EDIT: for existing files, FILE: for new files — NEVER output a complete existing file.",
-    "6. Do NOT use plain ``` code blocks — ONLY EDIT: and FILE: blocks.",
+    "   PREAMBLE_REPLACE: src/types.ts",
+    "   ---",
+    "   import { Something } from './new-thing.js';",
+    "   import { Other } from './other.js';",
+    "   ---",
+    "",
+    "5. FILE: — create entirely NEW files (not for modifying existing files):",
+    "",
+    "   FILE: src/utils/new-helper.ts",
+    "   ```typescript",
+    "   // complete new file content",
+    "   ```",
+    "",
+    "RULES:",
+    "- Target segments by their KEY from the BLOCK MAP below (e.g., fn:writeFiles, class:Orchestrator#run, gap:1, preamble)",
+    "- Content between --- delimiters replaces the ENTIRE segment — include ALL code for that block",
+    "- Only modify segments that the decision requires — leave everything else untouched",
+    "- If you need to add a new function, use BLOCK_INSERT_AFTER with an existing segment as anchor",
+    "- For new files, use FILE: blocks with complete content",
+    "- Do NOT output explanations, commentary, or markdown headers — ONLY operations",
+    "- Do NOT use EDIT: search-and-replace blocks — they are deprecated",
+    "- Do NOT use plain ``` code blocks — ONLY BLOCK_*, PREAMBLE_REPLACE, and FILE: operations",
     "",
     "=== END OUTPUT FORMAT ===",
+    ...blockMapLines,
     ...sourceContextLines,
     "DECISION TO IMPLEMENT:",
     "---",
     decision,
     "---",
     "",
-    "REMINDER: Output ONLY EDIT: and FILE: blocks. No explanations. No plain code blocks.",
-    "Start your response with EDIT: or FILE: immediately.",
+    "REMINDER: Output ONLY BLOCK_REPLACE/BLOCK_INSERT_AFTER/BLOCK_DELETE/PREAMBLE_REPLACE and FILE: operations.",
+    "Target segments by their KEY from the BLOCK MAP. No explanations. Start immediately.",
   ].join("\n");
 
-  // Execute with retry loop — if validation fails, retry with error feedback
-  const MAX_RETRIES = 2;
+  // Execute — single attempt, no retry loop
   const timeoutMs = config.rules.timeout_per_turn_seconds * 1000 * 3; // Triple timeout for execution
 
-  let staged = new Map<string, string>();
-  let currentPrompt = executionPrompt;
-  let attempt = 0;
-  let succeeded = false;
+  const spinner = ora(
+    chalk.cyan(`  ${leadKnight.name} unsheathes their keyboard...`)
+  ).start();
 
-  while (attempt <= MAX_RETRIES) {
-    attempt++;
-    const isRetry = attempt > 1;
+  let result: string;
+  try {
+    result = await adapter.execute(executionPrompt, timeoutMs);
+    spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
+  } catch (error) {
+    spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
+    await updateStatus(session.path, { phase: "consensus_reached" });
+    throw error;
+  }
 
-    const spinner = ora(
-      chalk.cyan(isRetry
-        ? `  ${leadKnight.name} tries again (attempt ${attempt}/${MAX_RETRIES + 1})...`
-        : `  ${leadKnight.name} unsheathes their keyboard...`)
-    ).start();
+  // --- DETECT FORMAT: RTDIFF block ops vs legacy EDIT: vs FILE: only ---
+  const hasRtdiff = isRtdiffResponse(result);
+  const hasLegacyEdit = isLegacyEditResponse(result);
 
-    let result: string;
-    try {
-      result = await adapter.execute(currentPrompt, timeoutMs);
-      spinner.succeed(chalk.cyan(isRetry
-        ? `  ${leadKnight.name} has reforged the code (attempt ${attempt})`
-        : `  ${leadKnight.name} has forged the code`));
-    } catch (error) {
-      spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
-      await updateStatus(session.path, { phase: "consensus_reached" });
-      throw error;
-    }
+  if (hasLegacyEdit && !hasRtdiff) {
+    console.log(chalk.yellow("\n  ⚠ Legacy EDIT: format detected — the knight used the old format."));
+    console.log(chalk.dim("  Processing with legacy parser. Consider re-running for better results.\n"));
+  }
 
-    // --- PARSE: extract EDIT: and FILE: blocks ---
-    const { files: allFiles, edits: allEdits } = parseKnightOutput(result);
+  // --- PARSE + STAGE ---
+  const staged = new Map<string, string>();
+  const stageErrors: string[] = [];
 
-    if (allFiles.length === 0 && allEdits.length === 0) {
-      console.log(
-        chalk.yellow(
-          "\n  The knight returned... but brought no files. Just words."
-        )
-      );
-      console.log(chalk.dim("  Raw response:"));
-      const indented = result
-        .split("\n")
-        .slice(0, 30)
-        .map((line) => `  ${line}`)
-        .join("\n");
+  if (hasRtdiff) {
+    // === NEW PATH: RTDIFF block operations ===
+    const rtdiff = parseRtdiff(result);
+
+    if (rtdiff.operations.length === 0 && rtdiff.newFiles.length === 0) {
+      console.log(chalk.yellow("\n  The knight returned... but brought no operations. Just words."));
+      console.log(chalk.dim("  Raw response (first 30 lines):"));
+      const indented = result.split("\n").slice(0, 30).map(l => `  ${l}`).join("\n");
       console.log(chalk.dim(indented));
-      if (result.split("\n").length > 30) {
-        console.log(chalk.dim("  ...(truncated)"));
-      }
       await updateStatus(session.path, { phase: "consensus_reached" });
       return;
     }
 
-    // --- SCOPE FILTER ---
+    // Group operations by file
+    const opsByFile = new Map<string, typeof rtdiff.operations>();
+    for (const op of rtdiff.operations) {
+      const normalized = normalizeScopePath(op.filePath);
+      if (!opsByFile.has(normalized)) opsByFile.set(normalized, []);
+      opsByFile.get(normalized)!.push({ ...op, filePath: normalized });
+    }
+
+    // Scope filter for operations
+    if (scopeActive) {
+      for (const filePath of opsByFile.keys()) {
+        const inScope = allowedFiles!.some(af => {
+          const clean = af.toUpperCase().startsWith("NEW:") ? normalizeScopePath(af.slice(4)) : normalizeScopePath(af);
+          return normalizeScopePath(filePath) === clean;
+        });
+        if (!inScope) {
+          console.log(chalk.red(`  SCOPE VIOLATION: ${filePath} — blocked`));
+          opsByFile.delete(filePath);
+        }
+      }
+    }
+
+    // Apply block operations per file
+    for (const [filePath, ops] of opsByFile) {
+      const fullPath = resolve(projectRoot, filePath);
+
+      if (!existsSync(fullPath)) {
+        stageErrors.push(`${filePath}: file not found (use FILE: for new files)`);
+        continue;
+      }
+
+      const originalContent = await readFile(fullPath, "utf-8");
+      const segments = fileSegments.get(filePath);
+
+      if (!segments || segments.length === 0) {
+        // Re-scan if not in cache (shouldn't happen, but safety first)
+        const scanResult = scanBlocks(originalContent);
+        fileSegments.set(filePath, scanResult.segments);
+      }
+
+      const patchResult = applyBlockOperations(
+        originalContent,
+        ops,
+        fileSegments.get(filePath)!
+      );
+
+      if (!patchResult.success) {
+        stageErrors.push(patchResult.error || `${filePath}: patch failed`);
+        continue;
+      }
+
+      if (patchResult.content && patchResult.content !== originalContent) {
+        staged.set(filePath, patchResult.content);
+      }
+    }
+
+    // Stage new FILE: blocks
+    const scopeFilter = scopeActive ? allowedFiles : undefined;
+    const { allowed: newFilesAllowed, rejected: newFilesRejected } = filterByScope(
+      rtdiff.newFiles.map(f => ({ path: normalizeScopePath(f.path), content: f.content })),
+      scopeFilter
+    );
+
+    for (const rej of newFilesRejected) {
+      console.log(chalk.red(`  SCOPE VIOLATION: ${rej.path} — blocked`));
+    }
+
+    for (const nf of newFilesAllowed) {
+      staged.set(nf.path, nf.content);
+    }
+
+  } else {
+    // === LEGACY PATH: EDIT: and FILE: blocks ===
+    const { files: allFiles, edits: allEdits } = parseKnightOutput(result);
+
+    if (allFiles.length === 0 && allEdits.length === 0) {
+      console.log(chalk.yellow("\n  The knight returned... but brought no files. Just words."));
+      console.log(chalk.dim("  Raw response (first 30 lines):"));
+      const indented = result.split("\n").slice(0, 30).map(l => `  ${l}`).join("\n");
+      console.log(chalk.dim(indented));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      return;
+    }
+
+    // Scope filter
     const scopeFilter = scopeActive ? allowedFiles : undefined;
     const { allowed: files, rejected: rejFiles } = filterByScope(allFiles, scopeFilter);
     const { allowed: edits, rejected: rejEdits } = filterByScope(allEdits, scopeFilter);
@@ -444,13 +558,8 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     const totalRejected = rejFiles.length + rejEdits.length;
     if (totalRejected > 0) {
       console.log(chalk.red.bold(`\n  SCOPE VIOLATION — ${totalRejected} file(s) blocked:`));
-      for (const f of rejFiles) {
-        console.log(chalk.red(`    ${f.path}`));
-      }
-      for (const e of rejEdits) {
-        console.log(chalk.red(`    ${e.path}`));
-      }
-      console.log(chalk.dim(`\n  These files were not in the agreed scope.`));
+      for (const f of rejFiles) console.log(chalk.red(`    ${f.path}`));
+      for (const e of rejEdits) console.log(chalk.red(`    ${e.path}`));
       console.log(chalk.dim(`  Use ${chalk.bold("roundtable apply --override-scope")} to bypass.\n`));
     }
 
@@ -460,16 +569,12 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       return;
     }
 
-    // --- STAGE: build in-memory Map<path, content> ---
-    staged = new Map<string, string>();
-    const stageErrors: string[] = [];
-
-    // Stage FILE: blocks (new files) — content goes directly into map
+    // Stage FILE: blocks
     for (const file of files) {
       staged.set(file.path, file.content);
     }
 
-    // Stage EDIT: blocks — apply edits to originals, result goes into map
+    // Stage EDIT: blocks
     for (const edit of edits) {
       const fullPath = resolve(projectRoot, edit.path);
 
@@ -481,114 +586,48 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       const originalContent = await readFile(fullPath, "utf-8");
       const editResult = applyEdits(originalContent, edit.edits, edit.path);
 
-      // All-or-nothing per file: if ANY edit failed, reject the entire file
       if (editResult.failedEdits && editResult.failedEdits.length > 0) {
-        for (const err of editResult.errors || []) {
-          stageErrors.push(err);
-        }
+        for (const err of editResult.errors || []) stageErrors.push(err);
         continue;
       }
 
-      // No changes? Skip silently
-      if (!editResult.content || editResult.content === originalContent) {
-        continue;
-      }
+      if (!editResult.content || editResult.content === originalContent) continue;
 
       staged.set(edit.path, editResult.content);
     }
-
-    // Show staging errors (failed edits)
-    if (stageErrors.length > 0) {
-      console.log(chalk.red.bold(`\n  STAGING ERRORS — ${stageErrors.length} issue(s):`));
-      for (const err of stageErrors) {
-        console.log(chalk.yellow(`    ${err}`));
-      }
-    }
-
-    if (staged.size === 0) {
-      console.log(chalk.yellow("\n  Nothing to stage. All edits failed or no changes detected."));
-      await updateStatus(session.path, { phase: "consensus_reached" });
-      return;
-    }
-
-    // --- VALIDATE: run all checks on staged content ---
-    const spinnerVal = ora(chalk.dim("  Validating staged output...")).start();
-    const reports = validateAll(staged);
-    const failedReports = reports.filter((r) => !r.passed);
-
-    if (failedReports.length > 0) {
-      spinnerVal.fail(chalk.red("  Validation FAILED"));
-      const reportText = formatValidationReport(reports);
-      console.log(reportText);
-
-      // --- FIX-CALL: send the broken code back with specific errors ---
-      if (attempt <= MAX_RETRIES) {
-        console.log(chalk.yellow(`  Sending broken code to knight for targeted fix (attempt ${attempt + 1}/${MAX_RETRIES + 1})...\n`));
-
-        // Build fix prompt: only the broken files + their specific errors
-        const fixBlocks: string[] = [
-          "CRITICAL: You are running in TEXT-ONLY output mode.",
-          "You CANNOT write files, use tools, or edit anything.",
-          "",
-          "Your previous code output had validation errors.",
-          "Below is the BROKEN code and the EXACT errors.",
-          "Your ONLY job: fix ONLY the listed errors. Change NOTHING else.",
-          "",
-        ];
-
-        for (const report of failedReports) {
-          const brokenContent = staged.get(report.path);
-          if (!brokenContent) continue;
-
-          fixBlocks.push(`=== BROKEN FILE: ${report.path} ===`);
-          fixBlocks.push(brokenContent);
-          fixBlocks.push(`=== END BROKEN FILE ===`);
-          fixBlocks.push("");
-          fixBlocks.push("ERRORS to fix:");
-          for (const issue of report.issues) {
-            const lineInfo = issue.line > 0 ? ` (line ${issue.line})` : "";
-            fixBlocks.push(`  - ${issue.type}${lineInfo}: ${issue.message}`);
-            if (issue.snippet) {
-              fixBlocks.push(`    > ${issue.snippet}`);
-            }
-          }
-          fixBlocks.push("");
-        }
-
-        fixBlocks.push(
-          "Output the COMPLETE fixed file(s) using FILE: blocks:",
-          "",
-          "FILE: path/to/file.ts",
-          "```typescript",
-          "// the entire corrected file content",
-          "```",
-          "",
-          "RULES:",
-          "- Output the COMPLETE file content, not EDIT: blocks",
-          "- Fix ONLY the listed errors — do NOT change anything else",
-          "- Ensure every { has a matching }, every [ has a ], every ( has a )",
-          "- Do NOT add commentary — ONLY FILE: blocks",
-        );
-
-        currentPrompt = fixBlocks.join("\n");
-        continue; // retry with fix prompt
-      }
-
-      // No retries left
-      console.log(chalk.red.bold("  All retries exhausted. The knight cannot produce clean code."));
-      await updateStatus(session.path, { phase: "consensus_reached" });
-      return;
-    }
-
-    spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
-    succeeded = true;
-    break; // validation passed, exit retry loop
   }
 
-  if (!succeeded) {
+  // Show staging errors
+  if (stageErrors.length > 0) {
+    console.log(chalk.red.bold(`\n  STAGING ERRORS — ${stageErrors.length} issue(s):`));
+    for (const err of stageErrors) {
+      console.log(chalk.yellow(`    ${err}`));
+    }
+  }
+
+  if (staged.size === 0) {
+    console.log(chalk.yellow("\n  Nothing to stage. All operations failed or no changes detected."));
     await updateStatus(session.path, { phase: "consensus_reached" });
     return;
   }
+
+  // --- VALIDATE: run all checks on staged content ---
+  const spinnerVal = ora(chalk.dim("  Validating staged output...")).start();
+  const reports = validateAll(staged);
+  const failedReports = reports.filter((r) => !r.passed);
+
+  if (failedReports.length > 0) {
+    spinnerVal.fail(chalk.red("  Validation FAILED"));
+    const reportText = formatValidationReport(reports);
+    console.log(reportText);
+    console.log(chalk.red.bold("  The knight's output has validation errors. 0 files written."));
+    console.log(chalk.dim("  Read the decision in .roundtable/sessions/*/decisions.md and apply manually,"));
+    console.log(chalk.dim("  or re-run `roundtable apply` to try again.\n"));
+    await updateStatus(session.path, { phase: "consensus_reached" });
+    return;
+  }
+
+  spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
 
   // --- WRITE: backup + atomic write ---
   const totalCount = staged.size;
