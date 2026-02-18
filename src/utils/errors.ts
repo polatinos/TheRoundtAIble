@@ -11,6 +11,7 @@ export enum ExitCode {
   SESSION_ERROR = 3,
   FILE_WRITE_ERROR = 4,
   CONSENSUS_ERROR = 5,
+  VALIDATION_ERROR = 6,
   UNKNOWN = 99,
 }
 
@@ -75,6 +76,21 @@ export class ConsensusError extends RoundtableError {
   constructor(message: string, options?: ErrorOptions) {
     super(message, ExitCode.CONSENSUS_ERROR, options);
     this.name = 'ConsensusError';
+  }
+}
+
+export class ValidationError extends RoundtableError {
+  public readonly reports: import("../types.js").ValidationReport[];
+
+  constructor(reports: import("../types.js").ValidationReport[], options?: ErrorOptions) {
+    const failedFiles = reports.filter(r => !r.passed).map(r => r.path);
+    super(
+      `Validation failed for ${failedFiles.length} file(s): ${failedFiles.join(", ")}`,
+      ExitCode.VALIDATION_ERROR,
+      { ...options, hint: "Fix the issues above or re-run the knight with a different prompt." }
+    );
+    this.name = 'ValidationError';
+    this.reports = reports;
   }
 }
 

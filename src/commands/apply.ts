@@ -4,17 +4,19 @@ import { join, resolve } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "../utils/config.js";
-import { ConfigError, SessionError, AdapterError as AdapterErr } from "../utils/errors.js";
+import { SessionError, AdapterError as AdapterErr, ValidationError } from "../utils/errors.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { findLatestSession, updateStatus } from "../utils/session.js";
 import { selectLeadKnight } from "../orchestrator.js";
 import {
-  parseCodeBlocks,
-  writeFilesDirect,
-  writeFilesWithConfirmation,
   filterByScope,
   normalizeScopePath,
+  writeStagedFiles,
+  writeStagedFilesWithConfirmation,
 } from "../utils/file-writer.js";
+import { parseKnightOutput } from "../utils/edit-parser.js";
+import { applyEdits } from "../utils/edit-parser.js";
+import { validateAll, formatValidationReport } from "../utils/validation.js";
 import { askParleyMode } from "../utils/decree.js";
 import { addManifestEntry, topicToFeatureId, getFeatureSummary } from "../utils/manifest.js";
 import { addDecreeEntry } from "../utils/decree-log.js";
@@ -24,14 +26,19 @@ import { createInterface } from "node:readline/promises";
 
 /**
  * Maximum total characters of source context to inject.
- * Beyond this, token overflow is likely. Hard fail with actionable hint.
+ * With EDIT format, output is much smaller so we can afford more input.
  */
-const MAX_SOURCE_CONTEXT_CHARS = 150_000;
+const MAX_SOURCE_CONTEXT_CHARS = 500_000;
+
+/**
+ * Maximum characters per single source file before truncation.
+ */
+const MAX_SINGLE_FILE_CHARS = 80_000;
 
 /**
  * Read all existing allowed_files and build a source context string.
  * Skips NEW: files (they don't exist yet).
- * Returns formatted context with path + hash + content per file.
+ * Truncates oversized files with a warning.
  */
 async function buildSourceContext(
   allowedFiles: string[],
@@ -56,13 +63,23 @@ async function buildSourceContext(
     }
 
     try {
-      const content = await readFile(fullPath, "utf-8");
+      let content = await readFile(fullPath, "utf-8");
       const hash = hashContent(content);
+      let truncNote = "";
+
+      if (content.length > MAX_SINGLE_FILE_CHARS) {
+        const originalKB = Math.round(content.length / 1024);
+        const limitKB = Math.round(MAX_SINGLE_FILE_CHARS / 1024);
+        content = content.slice(0, MAX_SINGLE_FILE_CHARS);
+        truncNote = ` (TRUNCATED: ${originalKB}KB -> ${limitKB}KB)`;
+      }
+
       const block = [
-        `=== SOURCE: ${normalized} (hash: ${hash}) ===`,
+        `=== SOURCE: ${normalized} (hash: ${hash})${truncNote} ===`,
         content,
+        truncNote ? `... (rest truncated) ...` : "",
         `=== END SOURCE ===`,
-      ].join("\n");
+      ].filter(Boolean).join("\n");
 
       blocks.push(block);
       totalChars += content.length;
@@ -84,7 +101,9 @@ async function buildSourceContext(
 /**
  * The `roundtable apply` command.
  * Reads the latest session's decision and executes it via the Lead Knight.
- * Now actually writes files to disk instead of just printing text.
+ *
+ * Pipeline: parse → stage (in-memory) → validate → backup → write
+ * Any validation failure = 0 files written (all-or-nothing).
  *
  * Modes:
  *   --parley (default) — shows each file, asks for confirmation
@@ -267,7 +286,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     sourceContextBlock = context;
   }
 
-  // Build execution prompt with source context + file format instructions
+  // Build execution prompt with EDIT format instructions
   const scopeLines = scopeActive
     ? [
         "",
@@ -306,28 +325,41 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     "MANDATORY EDITING RULES (VIOLATION = REJECTED OUTPUT):",
     "1. EDIT, DON'T REWRITE — only change what the decision requires.",
     "2. KEEP all existing functionality intact — every import, export, function, type.",
-    "3. For NEW: files (not in source context), output the complete new file.",
-    "4. For existing files, output the COMPLETE file but PRESERVE all existing code.",
-    "5. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
-    "6. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
-    "7. Compare your output against the source context above — if you removed something, ADD IT BACK.",
+    "3. If the decision doesn't mention a function/import/export — DON'T TOUCH IT.",
+    "4. Removing existing functionality is FORBIDDEN unless the decision explicitly says to remove it.",
     "",
     "OUTPUT FORMAT — follow this EXACTLY:",
-    "For EACH file, output this pattern:",
     "",
-    "FILE: path/to/file.ts",
+    "For EXISTING files, use EDIT: blocks with search-and-replace:",
+    "",
+    "EDIT: path/to/file.ts",
+    "<<<< SEARCH",
+    "// exact lines from the source context to find",
+    ">>>> REPLACE",
+    "// replacement lines",
+    "====",
+    "",
+    "Rules for EDIT: blocks:",
+    "- SEARCH must EXACTLY match text in the source context above (copy-paste, don't retype)",
+    "- Keep SEARCH blocks small: only the lines being changed + 1-2 context lines",
+    "- Multiple edits per file: repeat <<<< SEARCH / >>>> REPLACE / ==== under the same EDIT: header",
+    "- Edits are applied sequentially top-to-bottom",
+    "- To DELETE lines: use empty >>>> REPLACE section",
+    "- To INSERT lines: use a small SEARCH that matches where to insert, then include those lines + new lines in REPLACE",
+    "",
+    "For NEW files only, use FILE: blocks:",
+    "",
+    "FILE: path/to/new-file.ts",
     "```typescript",
-    "// complete file content here",
+    "// complete new file content",
     "```",
     "",
-    "Rules:",
-    "- Start each file with FILE: followed by the relative path",
-    "- Then a fenced code block with the COMPLETE file content",
-    "- Do NOT use partial snippets or diffs — give the FULL file",
-    "- Include ALL files needed to implement the decision",
+    "General rules:",
+    "- Use EDIT: for existing files, FILE: for new files",
+    "- Do NOT output complete files for existing code — only the changes",
     "- Do NOT ask for permission — just output the text",
-    "- Do NOT explain anything — ONLY output FILE: blocks",
-    "- No commentary, no questions, no tool usage — just the files",
+    "- Do NOT explain anything — ONLY output EDIT: and FILE: blocks",
+    "- No commentary, no questions, no tool usage — just the edits",
   ].join("\n");
 
   // Execute
@@ -340,10 +372,10 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     const result = await adapter.execute(executionPrompt, timeoutMs);
     spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
 
-    // Parse code blocks from response
-    const allFiles = parseCodeBlocks(result);
+    // --- PARSE: extract EDIT: and FILE: blocks ---
+    const { files: allFiles, edits: allEdits } = parseKnightOutput(result);
 
-    if (allFiles.length === 0) {
+    if (allFiles.length === 0 && allEdits.length === 0) {
       console.log(
         chalk.yellow(
           "\n  The knight returned... but brought no files. Just words."
@@ -363,36 +395,106 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
       return;
     }
 
-    // Apply scope filtering
-    const { allowed: files, rejected } = filterByScope(allFiles, scopeActive ? allowedFiles : undefined);
+    // --- SCOPE FILTER ---
+    const scopeFilter = scopeActive ? allowedFiles : undefined;
+    const { allowed: files, rejected: rejFiles } = filterByScope(allFiles, scopeFilter);
+    const { allowed: edits, rejected: rejEdits } = filterByScope(allEdits, scopeFilter);
 
-    if (rejected.length > 0) {
-      console.log(chalk.red.bold(`\n  SCOPE VIOLATION — ${rejected.length} file(s) blocked:`));
-      for (const f of rejected) {
+    const totalRejected = rejFiles.length + rejEdits.length;
+    if (totalRejected > 0) {
+      console.log(chalk.red.bold(`\n  SCOPE VIOLATION — ${totalRejected} file(s) blocked:`));
+      for (const f of rejFiles) {
         console.log(chalk.red(`    ${f.path}`));
+      }
+      for (const e of rejEdits) {
+        console.log(chalk.red(`    ${e.path}`));
       }
       console.log(chalk.dim(`\n  These files were not in the agreed scope.`));
       console.log(chalk.dim(`  Use ${chalk.bold("roundtable apply --override-scope")} to bypass.\n`));
     }
 
-    if (files.length === 0) {
+    if (files.length === 0 && edits.length === 0) {
       console.log(chalk.yellow("\n  All files were outside scope. Nothing to write."));
       await updateStatus(session.path, { phase: "consensus_reached" });
       return;
     }
 
-    console.log(
-      chalk.bold(`\n  ${files.length} file(s) forged by ${leadKnight.name}:\n`)
-    );
+    // --- STAGE: build in-memory Map<path, content> ---
+    const staged = new Map<string, string>();
+    const stageErrors: string[] = [];
 
-    // Write files based on mode
+    // Stage FILE: blocks (new files) — content goes directly into map
+    for (const file of files) {
+      staged.set(file.path, file.content);
+    }
+
+    // Stage EDIT: blocks — apply edits to originals, result goes into map
+    for (const edit of edits) {
+      const fullPath = resolve(projectRoot, edit.path);
+
+      if (!existsSync(fullPath)) {
+        stageErrors.push(`${edit.path}: file not found (use FILE: for new files)`);
+        continue;
+      }
+
+      const originalContent = await readFile(fullPath, "utf-8");
+      const editResult = applyEdits(originalContent, edit.edits, edit.path);
+
+      // All-or-nothing per file: if ANY edit failed, reject the entire file
+      if (editResult.failedEdits && editResult.failedEdits.length > 0) {
+        for (const err of editResult.errors || []) {
+          stageErrors.push(err);
+        }
+        continue;
+      }
+
+      // No changes? Skip silently
+      if (!editResult.content || editResult.content === originalContent) {
+        continue;
+      }
+
+      staged.set(edit.path, editResult.content);
+    }
+
+    // Show staging errors (failed edits)
+    if (stageErrors.length > 0) {
+      console.log(chalk.red.bold(`\n  STAGING ERRORS — ${stageErrors.length} issue(s):`));
+      for (const err of stageErrors) {
+        console.log(chalk.yellow(`    ${err}`));
+      }
+    }
+
+    if (staged.size === 0) {
+      console.log(chalk.yellow("\n  Nothing to stage. All edits failed or no changes detected."));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      return;
+    }
+
+    // --- VALIDATE: run all checks on staged content ---
+    const spinnerVal = ora(chalk.dim("  Validating staged output...")).start();
+    const reports = validateAll(staged);
+    const failedReports = reports.filter((r) => !r.passed);
+
+    if (failedReports.length > 0) {
+      spinnerVal.fail(chalk.red("  Validation FAILED"));
+      console.log(formatValidationReport(reports));
+      await updateStatus(session.path, { phase: "consensus_reached" });
+      return;
+    }
+
+    spinnerVal.succeed(chalk.dim(`  ${staged.size} file(s) passed validation`));
+
+    // --- WRITE: backup + atomic write ---
+    const totalCount = staged.size;
+    console.log(chalk.bold(`\n  ${totalCount} file(s) ready to write:\n`));
+
     let writeResult;
     if (noparley) {
       console.log(chalk.red("  No parley mode — writing all files directly.\n"));
-      writeResult = await writeFilesDirect(files, projectRoot);
+      writeResult = await writeStagedFiles(staged, projectRoot, session.name);
     } else {
       console.log(chalk.dim("  Let's review what the knight proposes:\n"));
-      writeResult = await writeFilesWithConfirmation(files, projectRoot);
+      writeResult = await writeStagedFilesWithConfirmation(staged, projectRoot, session.name);
     }
 
     // Update status + write manifest entry
@@ -421,6 +523,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
         chalk.bold.green(`\n  ${writeResult.count} file(s) written. The decision has been executed.`)
       );
       console.log(chalk.dim(`  Manifest updated: ${featureId} [${featureStatus}]`));
+      console.log(chalk.dim(`  Backups saved to .roundtable/backups/${session.name}/`));
       console.log(chalk.dim("  Review the changes before committing.\n"));
     } else {
       console.log(chalk.yellow("\n  No files were written. The decision remains unexecuted."));

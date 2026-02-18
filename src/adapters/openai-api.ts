@@ -41,7 +41,7 @@ export class OpenAIApiAdapter extends BaseAdapter {
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 2048,
+          max_tokens: 16384,
         }),
         signal: controller.signal,
       });

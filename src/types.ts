@@ -162,6 +162,48 @@ export interface DecreeLog {
   entries: DecreeEntry[];
 }
 
+// --- Validation types ---
+
+export type ValidationCheckType = "bracket_balance" | "artifact_detection" | "duplicate_import";
+
+export interface ValidationIssue {
+  type: ValidationCheckType;
+  message: string;
+  line: number;
+  snippet: string;
+}
+
+export interface ValidationReport {
+  path: string;
+  issues: ValidationIssue[];
+  passed: boolean;
+}
+
+// --- Edit/Diff types ---
+
+export interface EditOperation {
+  search: string;
+  replace: string;
+}
+
+export interface ParsedEdit {
+  path: string;
+  edits: EditOperation[];
+}
+
+export interface EditApplyResult {
+  path: string;
+  success: boolean;
+  content?: string;
+  failedEdits?: number[];
+  errors?: string[];
+}
+
+export interface ParsedKnightOutput {
+  files: Array<{ path: string; content: string; language: string }>;
+  edits: ParsedEdit[];
+}
+
 // --- File change types ---
 
 export interface FileChange {
