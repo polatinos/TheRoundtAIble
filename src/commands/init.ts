@@ -152,7 +152,7 @@ function generateConfig(
         args: ["-p", "{prompt}", "--print"],
       },
       "claude-api": {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         env_key: "ANTHROPIC_API_KEY",
       },
       "gemini-cli": {
@@ -160,7 +160,7 @@ function generateConfig(
         args: ["-p", "{prompt}"],
       },
       "gemini-api": {
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         env_key: "GEMINI_API_KEY",
       },
       "openai-cli": {
@@ -168,7 +168,7 @@ function generateConfig(
         args: ["exec", "{prompt}"],
       },
       "openai-api": {
-        model: "gpt-4o",
+        model: "gpt-5.2",
         env_key: "OPENAI_API_KEY",
       },
     },

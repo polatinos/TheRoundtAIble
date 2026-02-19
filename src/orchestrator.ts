@@ -28,6 +28,17 @@ import { readErrorLog } from "./utils/error-log.js";
 import { readDecreeLog, getActiveDecrees, formatDecreesForPrompt } from "./utils/decree-log.js";
 
 /**
+ * Fisher-Yates shuffle — randomize array order in-place.
+ */
+function shuffleArray<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
  * Strip JSON blocks containing a specific key from a response string.
  * Handles both fenced code blocks and bare JSON with balanced braces.
  */
@@ -183,7 +194,7 @@ export async function runDiscussion(
   const sessionPath = await createSession(projectRoot, topic);
   console.log(chalk.dim(`  Session: ${sessionPath}`));
 
-  // Sort knights by priority
+  // First round: sort by priority. Later rounds: shuffle to prevent yes-man behavior.
   const sortedKnights = [...config.knights].sort(
     (a, b) => a.priority - b.priority
   );
@@ -192,9 +203,19 @@ export async function runDiscussion(
   const latestBlocks: Map<string, ConsensusBlock> = new Map();
 
   for (let round = 1; round <= max_rounds; round++) {
+    // Round 1: priority order. Round 2+: shuffled to prevent yes-man behavior.
+    const roundOrder = round === 1
+      ? sortedKnights
+      : shuffleArray([...sortedKnights]);
+
+    if (round > 1) {
+      const orderStr = roundOrder.map((k) => k.name).join(" → ");
+      console.log(chalk.dim(`  Speaking order: ${orderStr}`));
+    }
+
     console.log(chalk.bold.blue(`\n  ${roundHeader(round, max_rounds)}\n`));
 
-    for (const knight of sortedKnights) {
+    for (const knight of roundOrder) {
       const adapter = adapters.get(knight.adapter);
       if (!adapter) {
         console.log(chalk.yellow(`  ${knight.name} didn't show up today. Typical.`));

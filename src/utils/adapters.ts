@@ -23,7 +23,7 @@ export function createAdapter(
     }
     case "claude-api": {
       const cfg = config.adapter_config["claude-api"] as AdapterApiConfig | undefined;
-      return new ClaudeApiAdapter(cfg?.model || "claude-sonnet-4-20250514", cfg?.env_key || "ANTHROPIC_API_KEY", timeoutMs);
+      return new ClaudeApiAdapter(cfg?.model || "claude-sonnet-4-6", cfg?.env_key || "ANTHROPIC_API_KEY", timeoutMs);
     }
     case "gemini-cli": {
       const cfg = config.adapter_config["gemini-cli"] as AdapterCliConfig | undefined;
@@ -31,7 +31,7 @@ export function createAdapter(
     }
     case "gemini-api": {
       const cfg = config.adapter_config["gemini-api"] as AdapterApiConfig | undefined;
-      return new GeminiApiAdapter(cfg?.model || "gemini-2.0-flash", cfg?.env_key || "GEMINI_API_KEY", timeoutMs);
+      return new GeminiApiAdapter(cfg?.model || "gemini-2.5-flash", cfg?.env_key || "GEMINI_API_KEY", timeoutMs);
     }
     case "openai-cli": {
       const cfg = config.adapter_config["openai-cli"] as AdapterCliConfig | undefined;
@@ -39,7 +39,7 @@ export function createAdapter(
     }
     case "openai-api": {
       const cfg = config.adapter_config["openai-api"] as AdapterApiConfig | undefined;
-      return new OpenAIApiAdapter(cfg?.model || "gpt-4o", cfg?.env_key || "OPENAI_API_KEY", timeoutMs);
+      return new OpenAIApiAdapter(cfg?.model || "gpt-5.2", cfg?.env_key || "OPENAI_API_KEY", timeoutMs);
     }
     default:
       return null;

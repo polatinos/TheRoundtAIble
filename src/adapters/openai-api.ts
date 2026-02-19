@@ -9,7 +9,7 @@ export class OpenAIApiAdapter extends BaseAdapter {
   private envKey: string;
   private defaultTimeout: number;
 
-  constructor(model: string = "gpt-4o", envKey: string = "OPENAI_API_KEY", timeoutMs: number = 120_000) {
+  constructor(model: string = "gpt-5.2", envKey: string = "OPENAI_API_KEY", timeoutMs: number = 120_000) {
     super();
     this.model = model;
     this.envKey = envKey;

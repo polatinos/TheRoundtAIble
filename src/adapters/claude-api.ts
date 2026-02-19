@@ -9,7 +9,7 @@ export class ClaudeApiAdapter extends BaseAdapter {
   private envKey: string;
   private defaultTimeout: number;
 
-  constructor(model: string = "claude-sonnet-4-20250514", envKey: string = "ANTHROPIC_API_KEY", timeoutMs: number = 120_000) {
+  constructor(model: string = "claude-sonnet-4-6", envKey: string = "ANTHROPIC_API_KEY", timeoutMs: number = 120_000) {
     super();
     this.model = model;
     this.envKey = envKey;

@@ -147,6 +147,27 @@ export function parseConsensusFromResponse(
 /**
  * Try to parse a JSON string into a ConsensusBlock.
  */
+/**
+ * Filter out non-meaningful entries from pending_issues.
+ * LLMs often write ["none"], ["no issues"], ["n/a"] instead of [].
+ */
+function sanitizePendingIssues(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+
+  const meaningless = new Set([
+    "", "none", "no", "n/a", "na", "nil", "null", "-",
+    "no issues", "no open issues", "no pending issues",
+    "geen", "geen issues", "geen open issues",
+    "all resolved", "all issues resolved", "resolved",
+    "nothing", "no concerns", "no remaining issues",
+  ]);
+
+  return raw
+    .filter((item): item is string => typeof item === "string")
+    .map((s) => s.trim())
+    .filter((s) => !meaningless.has(s.toLowerCase()));
+}
+
 function tryParseConsensus(
   json: string,
   knightName: string,
@@ -160,7 +181,7 @@ function tryParseConsensus(
         round: parsed.round || round,
         consensus_score: parsed.consensus_score,
         agrees_with: Array.isArray(parsed.agrees_with) ? parsed.agrees_with : [],
-        pending_issues: Array.isArray(parsed.pending_issues) ? parsed.pending_issues : [],
+        pending_issues: sanitizePendingIssues(parsed.pending_issues),
         proposal: parsed.proposal,
         files_to_modify: validateFilesToModify(parsed.files_to_modify),
       };

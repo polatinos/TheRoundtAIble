@@ -9,7 +9,7 @@ export class GeminiApiAdapter extends BaseAdapter {
   private envKey: string;
   private defaultTimeout: number;
 
-  constructor(model: string = "gemini-2.0-flash", envKey: string = "GEMINI_API_KEY", timeoutMs: number = 120_000) {
+  constructor(model: string = "gemini-2.5-flash", envKey: string = "GEMINI_API_KEY", timeoutMs: number = 120_000) {
     super();
     this.model = model;
     this.envKey = envKey;
