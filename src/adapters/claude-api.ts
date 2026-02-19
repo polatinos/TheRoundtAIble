@@ -2,14 +2,14 @@ import { BaseAdapter } from "./base.js";
 import { classifyError } from "../utils/errors.js";
 import { getKey } from "../utils/keys.js";
 
-export class OpenAIApiAdapter extends BaseAdapter {
-  readonly name = "GPT";
+export class ClaudeApiAdapter extends BaseAdapter {
+  readonly name = "Claude";
 
   private model: string;
   private envKey: string;
   private defaultTimeout: number;
 
-  constructor(model: string = "gpt-4o", envKey: string = "OPENAI_API_KEY", timeoutMs: number = 120_000) {
+  constructor(model: string = "claude-sonnet-4-20250514", envKey: string = "ANTHROPIC_API_KEY", timeoutMs: number = 120_000) {
     super();
     this.model = model;
     this.envKey = envKey;
@@ -25,7 +25,7 @@ export class OpenAIApiAdapter extends BaseAdapter {
     const apiKey = await getKey(this.envKey);
     if (!apiKey) {
       throw classifyError(
-        new Error(`OpenAI API key not set. Set ${this.envKey} or run 'roundtable init'.`),
+        new Error(`Anthropic API key not set. Set ${this.envKey} or run 'roundtable init'.`),
         this.name
       );
     }
@@ -35,35 +35,36 @@ export class OpenAIApiAdapter extends BaseAdapter {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
           max_tokens: 16384,
+          messages: [{ role: "user", content: prompt }],
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(`OpenAI API error (${response.status}): ${errorBody}`);
+        throw new Error(`Anthropic API error (${response.status}): ${errorBody}`);
       }
 
       const data = (await response.json()) as {
-        choices: Array<{ message: { content: string } }>;
+        content: Array<{ type: string; text: string }>;
       };
 
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error("OpenAI API returned empty response");
+      const text = data.content?.find((c) => c.type === "text")?.text;
+      if (!text) {
+        throw new Error("Anthropic API returned empty response");
       }
 
-      return content;
+      return text;
     } catch (error) {
       throw classifyError(error, this.name);
     } finally {

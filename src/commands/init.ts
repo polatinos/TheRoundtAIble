@@ -6,6 +6,7 @@ import { execa } from "execa";
 import chalk from "chalk";
 import ora from "ora";
 import type { RoundtableConfig, KnightConfig } from "../types.js";
+import { saveKey, getKey, getKeysPath } from "../utils/keys.js";
 
 interface DetectedTool {
   name: string;
@@ -38,6 +39,53 @@ async function askText(question: string, defaultValue: string): Promise<string> 
   const answer = await r.question(`${question} ${chalk.dim(`(${defaultValue})`)} `);
   r.close();
   return answer.trim() || defaultValue;
+}
+
+/**
+ * Ask for a secret (API key). Input is hidden with asterisks.
+ */
+async function askSecret(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const r = createInterface({ input: process.stdin, output: process.stdout });
+    // Mute output to hide the key as user types
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    if (stdin.isTTY && stdin.setRawMode) {
+      stdin.setRawMode(true);
+    }
+
+    process.stdout.write(`${question} `);
+    let secret = "";
+
+    const onData = (ch: Buffer) => {
+      const c = ch.toString("utf-8");
+      if (c === "\n" || c === "\r" || c === "\u0004") {
+        // Enter or EOF
+        if (stdin.isTTY && stdin.setRawMode) stdin.setRawMode(wasRaw ?? false);
+        stdin.removeListener("data", onData);
+        process.stdout.write("\n");
+        r.close();
+        resolve(secret.trim());
+      } else if (c === "\u007f" || c === "\b") {
+        // Backspace
+        if (secret.length > 0) {
+          secret = secret.slice(0, -1);
+          process.stdout.write("\b \b");
+        }
+      } else if (c === "\u0003") {
+        // Ctrl+C
+        if (stdin.isTTY && stdin.setRawMode) stdin.setRawMode(wasRaw ?? false);
+        stdin.removeListener("data", onData);
+        r.close();
+        resolve("");
+      } else {
+        secret += c;
+        process.stdout.write("*");
+      }
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 /**
@@ -103,9 +151,17 @@ function generateConfig(
         command: "claude",
         args: ["-p", "{prompt}", "--print"],
       },
+      "claude-api": {
+        model: "claude-sonnet-4-20250514",
+        env_key: "ANTHROPIC_API_KEY",
+      },
       "gemini-cli": {
         command: "gemini",
         args: ["-p", "{prompt}"],
+      },
+      "gemini-api": {
+        model: "gemini-2.0-flash",
+        env_key: "GEMINI_API_KEY",
       },
       "openai-cli": {
         command: "codex",
@@ -208,13 +264,28 @@ export async function initCommand(version: string): Promise<void> {
         // CLI not available → use API adapter directly, no fallback needed
         const apiAdapter = API_ADAPTERS[tool.adapter] || tool.adapter;
         const envKey = API_ENV_KEYS[apiAdapter];
+
+        if (envKey) {
+          // Check if key already exists (env var or keystore)
+          const existingKey = await getKey(envKey);
+          if (existingKey) {
+            console.log(chalk.green(`  ✓ ${tool.name} API key found`));
+          } else {
+            // Ask for the API key
+            const key = await askSecret(`  Enter your ${tool.name} API key:`);
+            if (key) {
+              await saveKey(envKey, key);
+              console.log(chalk.green(`  ✓ ${tool.name} API key saved securely to ${chalk.dim(getKeysPath())}`));
+            } else {
+              apiKeyReminders.push(`  ${envKey}  # ${tool.name}`);
+            }
+          }
+        }
+
         enabledKnights.push({
           name: tool.name,
           adapter: apiAdapter,
         });
-        if (envKey) {
-          apiKeyReminders.push(`    export ${envKey}="your-key-here"  # ${tool.name}`);
-        }
       }
     }
   }
@@ -260,13 +331,13 @@ export async function initCommand(version: string): Promise<void> {
   console.log(`    Knights:   ${config.knights.map((k) => chalk.cyan(k.name)).join(", ")}`);
   console.log(`    Config:    ${chalk.dim(join(roundtablePath, "config.json"))}`);
   console.log(`    Chronicle: ${chalk.dim(join(roundtablePath, "chronicle.md"))}`);
-  // Show API key setup instructions if any knights need them
+  // Show reminder for keys that weren't entered during init
   if (apiKeyReminders.length > 0) {
-    console.log(chalk.yellow("\n  ⚔  API keys required — set these environment variables:\n"));
+    console.log(chalk.yellow("\n  ⚔  Missing API keys — you skipped these during setup:\n"));
     for (const reminder of apiKeyReminders) {
       console.log(chalk.cyan(reminder));
     }
-    console.log(chalk.dim("\n  Add them to ~/.bashrc or ~/.profile to make them permanent."));
+    console.log(chalk.dim("\n  Re-run `roundtable init` to enter them, or set as environment variables."));
   }
 
   console.log(

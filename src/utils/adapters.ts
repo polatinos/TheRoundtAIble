@@ -2,7 +2,9 @@ import chalk from "chalk";
 import type { RoundtableConfig, AdapterCliConfig, AdapterApiConfig } from "../types.js";
 import { BaseAdapter } from "../adapters/base.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
+import { ClaudeApiAdapter } from "../adapters/claude-api.js";
 import { GeminiCliAdapter } from "../adapters/gemini-cli.js";
+import { GeminiApiAdapter } from "../adapters/gemini-api.js";
 import { OpenAICliAdapter } from "../adapters/openai-cli.js";
 import { OpenAIApiAdapter } from "../adapters/openai-api.js";
 
@@ -19,9 +21,17 @@ export function createAdapter(
       const cfg = config.adapter_config["claude-cli"] as AdapterCliConfig | undefined;
       return new ClaudeCliAdapter(cfg?.command || "claude", timeoutMs);
     }
+    case "claude-api": {
+      const cfg = config.adapter_config["claude-api"] as AdapterApiConfig | undefined;
+      return new ClaudeApiAdapter(cfg?.model || "claude-sonnet-4-20250514", cfg?.env_key || "ANTHROPIC_API_KEY", timeoutMs);
+    }
     case "gemini-cli": {
       const cfg = config.adapter_config["gemini-cli"] as AdapterCliConfig | undefined;
       return new GeminiCliAdapter(cfg?.command || "gemini", timeoutMs);
+    }
+    case "gemini-api": {
+      const cfg = config.adapter_config["gemini-api"] as AdapterApiConfig | undefined;
+      return new GeminiApiAdapter(cfg?.model || "gemini-2.0-flash", cfg?.env_key || "GEMINI_API_KEY", timeoutMs);
     }
     case "openai-cli": {
       const cfg = config.adapter_config["openai-cli"] as AdapterCliConfig | undefined;

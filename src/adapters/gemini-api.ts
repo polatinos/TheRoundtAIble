@@ -2,14 +2,14 @@ import { BaseAdapter } from "./base.js";
 import { classifyError } from "../utils/errors.js";
 import { getKey } from "../utils/keys.js";
 
-export class OpenAIApiAdapter extends BaseAdapter {
-  readonly name = "GPT";
+export class GeminiApiAdapter extends BaseAdapter {
+  readonly name = "Gemini";
 
   private model: string;
   private envKey: string;
   private defaultTimeout: number;
 
-  constructor(model: string = "gpt-4o", envKey: string = "OPENAI_API_KEY", timeoutMs: number = 120_000) {
+  constructor(model: string = "gemini-2.0-flash", envKey: string = "GEMINI_API_KEY", timeoutMs: number = 120_000) {
     super();
     this.model = model;
     this.envKey = envKey;
@@ -25,7 +25,7 @@ export class OpenAIApiAdapter extends BaseAdapter {
     const apiKey = await getKey(this.envKey);
     if (!apiKey) {
       throw classifyError(
-        new Error(`OpenAI API key not set. Set ${this.envKey} or run 'roundtable init'.`),
+        new Error(`Gemini API key not set. Set ${this.envKey} or run 'roundtable init'.`),
         this.name
       );
     }
@@ -35,35 +35,32 @@ export class OpenAIApiAdapter extends BaseAdapter {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 16384,
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 16384 },
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(`OpenAI API error (${response.status}): ${errorBody}`);
+        throw new Error(`Gemini API error (${response.status}): ${errorBody}`);
       }
 
       const data = (await response.json()) as {
-        choices: Array<{ message: { content: string } }>;
+        candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
       };
 
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error("OpenAI API returned empty response");
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error("Gemini API returned empty response");
       }
 
-      return content;
+      return text;
     } catch (error) {
       throw classifyError(error, this.name);
     } finally {
