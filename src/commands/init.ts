@@ -173,6 +173,22 @@ export async function initCommand(version: string): Promise<void> {
     "openai-cli": "openai-api",
   };
 
+  // Map CLI adapters to their API-only counterparts
+  const API_ADAPTERS: Record<string, string> = {
+    "claude-cli": "claude-api",
+    "gemini-cli": "gemini-api",
+    "openai-cli": "openai-api",
+  };
+
+  // Map API adapters to their env var names
+  const API_ENV_KEYS: Record<string, string> = {
+    "claude-api": "ANTHROPIC_API_KEY",
+    "gemini-api": "GEMINI_API_KEY",
+    "openai-api": "OPENAI_API_KEY",
+  };
+
+  const apiKeyReminders: string[] = [];
+
   for (const tool of tools) {
     if (tool.available) {
       const use = await confirm(`  Seat ${tool.name} at the table?`, true);
@@ -189,11 +205,16 @@ export async function initCommand(version: string): Promise<void> {
         false
       );
       if (use) {
+        // CLI not available → use API adapter directly, no fallback needed
+        const apiAdapter = API_ADAPTERS[tool.adapter] || tool.adapter;
+        const envKey = API_ENV_KEYS[apiAdapter];
         enabledKnights.push({
           name: tool.name,
-          adapter: tool.adapter,
-          fallback: FALLBACKS[tool.adapter],
+          adapter: apiAdapter,
         });
+        if (envKey) {
+          apiKeyReminders.push(`    export ${envKey}="your-key-here"  # ${tool.name}`);
+        }
       }
     }
   }
@@ -239,6 +260,15 @@ export async function initCommand(version: string): Promise<void> {
   console.log(`    Knights:   ${config.knights.map((k) => chalk.cyan(k.name)).join(", ")}`);
   console.log(`    Config:    ${chalk.dim(join(roundtablePath, "config.json"))}`);
   console.log(`    Chronicle: ${chalk.dim(join(roundtablePath, "chronicle.md"))}`);
+  // Show API key setup instructions if any knights need them
+  if (apiKeyReminders.length > 0) {
+    console.log(chalk.yellow("\n  ⚔  API keys required — set these environment variables:\n"));
+    for (const reminder of apiKeyReminders) {
+      console.log(chalk.cyan(reminder));
+    }
+    console.log(chalk.dim("\n  Add them to ~/.bashrc or ~/.profile to make them permanent."));
+  }
+
   console.log(
     chalk.dim('\n  The table is set. Run `roundtable discuss "your question"` to begin.\n')
   );
