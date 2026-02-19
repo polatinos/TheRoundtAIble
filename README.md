@@ -51,6 +51,18 @@ Or use without installing:
 npx theroundtaible init
 ```
 
+### Updating
+
+```bash
+npm update -g theroundtaible
+```
+
+Check your version:
+
+```bash
+roundtable --version
+```
+
 ### Prerequisites
 
 - Node.js 20+
