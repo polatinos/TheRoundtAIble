@@ -254,6 +254,33 @@ export async function initCommand(version: string): Promise<void> {
           adapter: tool.adapter,
           fallback: FALLBACKS[tool.adapter],
         });
+
+        // Offer to set up fallback API key
+        const fallbackAdapter = FALLBACKS[tool.adapter];
+        const fallbackEnvKey = fallbackAdapter ? API_ENV_KEYS[fallbackAdapter] : undefined;
+        if (fallbackEnvKey) {
+          const existingFallbackKey = await getKey(fallbackEnvKey);
+          if (existingFallbackKey) {
+            console.log(chalk.dim(`  ✓ ${tool.name} fallback API key already set`));
+            const update = await confirm(`  Replace existing ${tool.name} fallback API key?`, false);
+            if (update) {
+              const key = await askSecret(`  Enter your new ${tool.name} API key:`);
+              if (key) {
+                await saveKey(fallbackEnvKey, key);
+                console.log(chalk.green(`  ✓ ${tool.name} fallback API key updated`));
+              }
+            }
+          } else {
+            const wantFallback = await confirm(`  Set up a fallback API key for ${tool.name}? (used if CLI fails)`, false);
+            if (wantFallback) {
+              const key = await askSecret(`  Enter your ${tool.name} API key:`);
+              if (key) {
+                await saveKey(fallbackEnvKey, key);
+                console.log(chalk.green(`  ✓ ${tool.name} fallback API key saved to ${chalk.dim(getKeysPath())}`));
+              }
+            }
+          }
+        }
       }
     } else {
       const use = await confirm(

@@ -1,167 +1,11 @@
 /**
  * Tests for diff-parser.ts — RTDIFF v1.1 parser + executor
  */
+import { describe, it, expect } from "vitest";
 import { parseRtdiff, applyBlockOperations, isRtdiffResponse, isLegacyEditResponse } from "../src/utils/diff-parser.js";
 import type { SegmentInfo } from "../src/types.js";
 
-let passed = 0;
-let failed = 0;
-
-function assert(condition: boolean, message: string) {
-  if (condition) {
-    console.log(`  \x1b[32m PASS \x1b[0m ${message}`);
-    passed++;
-  } else {
-    console.log(`  \x1b[31m FAIL \x1b[0m ${message}`);
-    failed++;
-  }
-}
-
-function assertEq<T>(actual: T, expected: T, message: string) {
-  assert(actual === expected, `${message} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`);
-}
-
-// --- Test: parseRtdiff — BLOCK_REPLACE ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: BLOCK_REPLACE ---\x1b[0m\n");
-
-const replaceInput = `RTDIFF/1
-
-BLOCK_REPLACE: src/utils/file-writer.ts :: fn:writeFiles
----
-export async function writeFiles(files: FileChange[]): Promise<void> {
-  for (const f of files) {
-    await fs.writeFile(f.path, f.content, "utf-8");
-  }
-}
----
-`;
-
-const replaceResult = parseRtdiff(replaceInput);
-assertEq(replaceResult.operations.length, 1, "One BLOCK_REPLACE operation parsed");
-assertEq(replaceResult.operations[0].type, "BLOCK_REPLACE", "Operation type is BLOCK_REPLACE");
-assertEq(replaceResult.operations[0].filePath, "src/utils/file-writer.ts", "File path is correct");
-assertEq(replaceResult.operations[0].segmentKey, "fn:writeFiles", "Segment key is fn:writeFiles");
-assert(replaceResult.operations[0].content!.includes("writeFiles"), "Content contains function name");
-assert(replaceResult.operations[0].content!.includes("fs.writeFile"), "Content contains implementation");
-assertEq(replaceResult.newFiles.length, 0, "No new files");
-
-// --- Test: parseRtdiff — BLOCK_INSERT_AFTER ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: BLOCK_INSERT_AFTER ---\x1b[0m\n");
-
-const insertInput = `BLOCK_INSERT_AFTER: src/orchestrator.ts :: fn:runDiscussion
----
-export function summarizeRound(round: number): string {
-  return \`Round \${round} complete\`;
-}
----
-`;
-
-const insertResult = parseRtdiff(insertInput);
-assertEq(insertResult.operations.length, 1, "One BLOCK_INSERT_AFTER operation parsed");
-assertEq(insertResult.operations[0].type, "BLOCK_INSERT_AFTER", "Operation type is BLOCK_INSERT_AFTER");
-assertEq(insertResult.operations[0].filePath, "src/orchestrator.ts", "File path correct");
-assertEq(insertResult.operations[0].segmentKey, "fn:runDiscussion", "Segment key correct");
-
-// --- Test: parseRtdiff — BLOCK_DELETE ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: BLOCK_DELETE ---\x1b[0m\n");
-
-const deleteInput = `BLOCK_DELETE: src/utils/old.ts :: fn:deprecatedHelper
-`;
-
-const deleteResult = parseRtdiff(deleteInput);
-assertEq(deleteResult.operations.length, 1, "One BLOCK_DELETE operation parsed");
-assertEq(deleteResult.operations[0].type, "BLOCK_DELETE", "Operation type is BLOCK_DELETE");
-assertEq(deleteResult.operations[0].filePath, "src/utils/old.ts", "File path correct");
-assertEq(deleteResult.operations[0].segmentKey, "fn:deprecatedHelper", "Segment key correct");
-assert(deleteResult.operations[0].content === undefined, "DELETE has no content");
-
-// --- Test: parseRtdiff — PREAMBLE_REPLACE ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: PREAMBLE_REPLACE ---\x1b[0m\n");
-
-const preambleInput = `PREAMBLE_REPLACE: src/index.ts
----
-import { Command } from "commander";
-import { version } from "./version.js";
-import { runDiscussion } from "./orchestrator.js";
----
-`;
-
-const preambleResult = parseRtdiff(preambleInput);
-assertEq(preambleResult.operations.length, 1, "One PREAMBLE_REPLACE operation parsed");
-assertEq(preambleResult.operations[0].type, "PREAMBLE_REPLACE", "Operation type is PREAMBLE_REPLACE");
-assertEq(preambleResult.operations[0].filePath, "src/index.ts", "File path correct");
-assertEq(preambleResult.operations[0].segmentKey, "preamble", "Segment key is preamble");
-assert(preambleResult.operations[0].content!.includes("commander"), "Content has import");
-
-// --- Test: parseRtdiff — Multiple operations ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: Multiple operations ---\x1b[0m\n");
-
-const multiInput = `RTDIFF/1
-
-BLOCK_REPLACE: src/a.ts :: fn:foo
----
-export function foo() { return 1; }
----
-
-BLOCK_DELETE: src/a.ts :: fn:bar
-
-BLOCK_INSERT_AFTER: src/a.ts :: fn:foo
----
-export function baz() { return 3; }
----
-`;
-
-const multiResult = parseRtdiff(multiInput);
-assertEq(multiResult.operations.length, 3, "Three operations parsed");
-assertEq(multiResult.operations[0].type, "BLOCK_REPLACE", "First op: BLOCK_REPLACE");
-assertEq(multiResult.operations[1].type, "BLOCK_DELETE", "Second op: BLOCK_DELETE");
-assertEq(multiResult.operations[2].type, "BLOCK_INSERT_AFTER", "Third op: BLOCK_INSERT_AFTER");
-
-// --- Test: parseRtdiff — FILE: blocks for new files ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: FILE: blocks for new files ---\x1b[0m\n");
-
-const fileBlockInput = `RTDIFF/1
-
-BLOCK_REPLACE: src/existing.ts :: fn:update
----
-export function update() { return true; }
----
-
-FILE: src/brand-new.ts
-\`\`\`typescript
-export function hello() {
-  return "world";
-}
-\`\`\`
-`;
-
-const fileBlockResult = parseRtdiff(fileBlockInput);
-assertEq(fileBlockResult.operations.length, 1, "One BLOCK operation parsed");
-assertEq(fileBlockResult.newFiles.length, 1, "One new FILE: detected");
-assertEq(fileBlockResult.newFiles[0].path, "src/brand-new.ts", "New file path correct");
-assert(fileBlockResult.newFiles[0].content.includes("hello"), "New file has content");
-
-// --- Test: parseRtdiff — No valid content (empty) ---
-
-console.log("\n\x1b[1m\x1b[36m--- parseRtdiff: Empty/invalid input ---\x1b[0m\n");
-
-const emptyResult = parseRtdiff("");
-assertEq(emptyResult.operations.length, 0, "Empty input: no operations");
-assertEq(emptyResult.newFiles.length, 0, "Empty input: no new files");
-
-const junkResult = parseRtdiff("This is just some text with no operations.");
-assertEq(junkResult.operations.length, 0, "Junk input: no operations");
-
-// --- Test: applyBlockOperations — BLOCK_REPLACE ---
-
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: BLOCK_REPLACE ---\x1b[0m\n");
-
+// Shared source content and segments for apply tests
 const sourceContent = `import { foo } from "bar";
 import { baz } from "qux";
 
@@ -179,140 +23,489 @@ const segments: SegmentInfo[] = [
   { key: "fn:world", kind: "function", startLine: 8, endLine: 10, name: "world" },
 ];
 
-const replaceOps = [{
-  type: "BLOCK_REPLACE" as const,
-  filePath: "src/test.ts",
-  segmentKey: "fn:hello",
-  content: `export function hello(): void {\n  console.log("REPLACED");\n}`,
-}];
+// ============================================================
+// parseRtdiff — BLOCK_REPLACE
+// ============================================================
 
-const applyResult = applyBlockOperations(sourceContent, replaceOps, segments);
-assert(applyResult.success, "BLOCK_REPLACE succeeded");
-assert(applyResult.content!.includes("REPLACED"), "Content was replaced");
-assert(applyResult.content!.includes("world"), "Other function untouched");
-assert(applyResult.content!.includes("import { foo }"), "Preamble untouched");
+describe("parseRtdiff: BLOCK_REPLACE", () => {
+  const input = `RTDIFF/1
 
-// --- Test: applyBlockOperations — BLOCK_INSERT_AFTER ---
+BLOCK_REPLACE: src/utils/file-writer.ts :: fn:writeFiles
+---
+export async function writeFiles(files: FileChange[]): Promise<void> {
+  for (const f of files) {
+    await fs.writeFile(f.path, f.content, "utf-8");
+  }
+}
+---
+`;
 
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: BLOCK_INSERT_AFTER ---\x1b[0m\n");
+  const result = parseRtdiff(input);
 
-const insertOps = [{
-  type: "BLOCK_INSERT_AFTER" as const,
-  filePath: "src/test.ts",
-  segmentKey: "fn:hello",
-  content: `export function newFunc(): void {\n  console.log("new");\n}`,
-}];
+  it("parses one operation", () => {
+    expect(result.operations.length).toBe(1);
+  });
 
-const insertApply = applyBlockOperations(sourceContent, insertOps, segments);
-assert(insertApply.success, "BLOCK_INSERT_AFTER succeeded");
-assert(insertApply.content!.includes("newFunc"), "New function was inserted");
-assert(insertApply.content!.includes("hello"), "Original hello still exists");
-assert(insertApply.content!.includes("world"), "Original world still exists");
+  it("operation type is BLOCK_REPLACE", () => {
+    expect(result.operations[0].type).toBe("BLOCK_REPLACE");
+  });
 
-// Verify order: hello should come before newFunc, newFunc before world
-const helloIdx = insertApply.content!.indexOf("hello");
-const newFuncIdx = insertApply.content!.indexOf("newFunc");
-const worldIdx = insertApply.content!.indexOf("world");
-assert(helloIdx < newFuncIdx, "hello before newFunc");
-assert(newFuncIdx < worldIdx, "newFunc before world");
+  it("file path is correct", () => {
+    expect(result.operations[0].filePath).toBe("src/utils/file-writer.ts");
+  });
 
-// --- Test: applyBlockOperations — BLOCK_DELETE ---
+  it("segment key is fn:writeFiles", () => {
+    expect(result.operations[0].segmentKey).toBe("fn:writeFiles");
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: BLOCK_DELETE ---\x1b[0m\n");
+  it("content contains function name", () => {
+    expect(result.operations[0].content).toContain("writeFiles");
+  });
 
-const deleteOps = [{
-  type: "BLOCK_DELETE" as const,
-  filePath: "src/test.ts",
-  segmentKey: "fn:hello",
-}];
+  it("content contains implementation", () => {
+    expect(result.operations[0].content).toContain("fs.writeFile");
+  });
 
-const deleteApply = applyBlockOperations(sourceContent, deleteOps, segments);
-assert(deleteApply.success, "BLOCK_DELETE succeeded");
-assert(!deleteApply.content!.includes("fn hello"), "hello function was deleted");
-assert(deleteApply.content!.includes("world"), "world function still exists");
-assert(deleteApply.content!.includes("import { foo }"), "Preamble still exists");
+  it("no new files", () => {
+    expect(result.newFiles.length).toBe(0);
+  });
+});
 
-// --- Test: applyBlockOperations — Missing segment error ---
+// ============================================================
+// parseRtdiff — BLOCK_INSERT_AFTER
+// ============================================================
 
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: Missing segment error ---\x1b[0m\n");
+describe("parseRtdiff: BLOCK_INSERT_AFTER", () => {
+  const input = `BLOCK_INSERT_AFTER: src/orchestrator.ts :: fn:runDiscussion
+---
+export function summarizeRound(round: number): string {
+  return \`Round \${round} complete\`;
+}
+---
+`;
 
-const badOps = [{
-  type: "BLOCK_REPLACE" as const,
-  filePath: "src/test.ts",
-  segmentKey: "fn:nonexistent",
-  content: "whatever",
-}];
+  const result = parseRtdiff(input);
 
-const badResult = applyBlockOperations(sourceContent, badOps, segments);
-assert(!badResult.success, "Missing segment fails");
-assert(badResult.error!.includes("PatchTargetError"), "Error mentions PatchTargetError");
-assert(badResult.error!.includes("fn:nonexistent"), "Error mentions the missing key");
-assert(badResult.error!.includes("fn:hello"), "Error lists available segments");
+  it("parses one operation", () => {
+    expect(result.operations.length).toBe(1);
+  });
 
-// --- Test: applyBlockOperations — Multiple ops bottom-to-top ---
+  it("operation type is BLOCK_INSERT_AFTER", () => {
+    expect(result.operations[0].type).toBe("BLOCK_INSERT_AFTER");
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: Multiple ops (bottom-to-top) ---\x1b[0m\n");
+  it("file path correct", () => {
+    expect(result.operations[0].filePath).toBe("src/orchestrator.ts");
+  });
 
-const multiOps = [
-  {
+  it("segment key correct", () => {
+    expect(result.operations[0].segmentKey).toBe("fn:runDiscussion");
+  });
+});
+
+// ============================================================
+// parseRtdiff — BLOCK_DELETE
+// ============================================================
+
+describe("parseRtdiff: BLOCK_DELETE", () => {
+  const input = `BLOCK_DELETE: src/utils/old.ts :: fn:deprecatedHelper
+`;
+
+  const result = parseRtdiff(input);
+
+  it("parses one operation", () => {
+    expect(result.operations.length).toBe(1);
+  });
+
+  it("operation type is BLOCK_DELETE", () => {
+    expect(result.operations[0].type).toBe("BLOCK_DELETE");
+  });
+
+  it("file path correct", () => {
+    expect(result.operations[0].filePath).toBe("src/utils/old.ts");
+  });
+
+  it("segment key correct", () => {
+    expect(result.operations[0].segmentKey).toBe("fn:deprecatedHelper");
+  });
+
+  it("DELETE has no content", () => {
+    expect(result.operations[0].content).toBeUndefined();
+  });
+});
+
+// ============================================================
+// parseRtdiff — PREAMBLE_REPLACE
+// ============================================================
+
+describe("parseRtdiff: PREAMBLE_REPLACE", () => {
+  const input = `PREAMBLE_REPLACE: src/index.ts
+---
+import { Command } from "commander";
+import { version } from "./version.js";
+import { runDiscussion } from "./orchestrator.js";
+---
+`;
+
+  const result = parseRtdiff(input);
+
+  it("parses one operation", () => {
+    expect(result.operations.length).toBe(1);
+  });
+
+  it("operation type is PREAMBLE_REPLACE", () => {
+    expect(result.operations[0].type).toBe("PREAMBLE_REPLACE");
+  });
+
+  it("file path correct", () => {
+    expect(result.operations[0].filePath).toBe("src/index.ts");
+  });
+
+  it("segment key is preamble", () => {
+    expect(result.operations[0].segmentKey).toBe("preamble");
+  });
+
+  it("content has import", () => {
+    expect(result.operations[0].content).toContain("commander");
+  });
+});
+
+// ============================================================
+// parseRtdiff — Multiple operations
+// ============================================================
+
+describe("parseRtdiff: Multiple operations", () => {
+  const input = `RTDIFF/1
+
+BLOCK_REPLACE: src/a.ts :: fn:foo
+---
+export function foo() { return 1; }
+---
+
+BLOCK_DELETE: src/a.ts :: fn:bar
+
+BLOCK_INSERT_AFTER: src/a.ts :: fn:foo
+---
+export function baz() { return 3; }
+---
+`;
+
+  const result = parseRtdiff(input);
+
+  it("three operations parsed", () => {
+    expect(result.operations.length).toBe(3);
+  });
+
+  it("first op: BLOCK_REPLACE", () => {
+    expect(result.operations[0].type).toBe("BLOCK_REPLACE");
+  });
+
+  it("second op: BLOCK_DELETE", () => {
+    expect(result.operations[1].type).toBe("BLOCK_DELETE");
+  });
+
+  it("third op: BLOCK_INSERT_AFTER", () => {
+    expect(result.operations[2].type).toBe("BLOCK_INSERT_AFTER");
+  });
+});
+
+// ============================================================
+// parseRtdiff — FILE: blocks for new files
+// ============================================================
+
+describe("parseRtdiff: FILE: blocks for new files", () => {
+  const input = `RTDIFF/1
+
+BLOCK_REPLACE: src/existing.ts :: fn:update
+---
+export function update() { return true; }
+---
+
+FILE: src/brand-new.ts
+\`\`\`typescript
+export function hello() {
+  return "world";
+}
+\`\`\`
+`;
+
+  const result = parseRtdiff(input);
+
+  it("one BLOCK operation parsed", () => {
+    expect(result.operations.length).toBe(1);
+  });
+
+  it("one new FILE: detected", () => {
+    expect(result.newFiles.length).toBe(1);
+  });
+
+  it("new file path correct", () => {
+    expect(result.newFiles[0].path).toBe("src/brand-new.ts");
+  });
+
+  it("new file has content", () => {
+    expect(result.newFiles[0].content).toContain("hello");
+  });
+});
+
+// ============================================================
+// parseRtdiff — Empty/invalid input
+// ============================================================
+
+describe("parseRtdiff: Empty/invalid input", () => {
+  it("empty input: no operations", () => {
+    const result = parseRtdiff("");
+    expect(result.operations.length).toBe(0);
+    expect(result.newFiles.length).toBe(0);
+  });
+
+  it("junk input: no operations", () => {
+    const result = parseRtdiff("This is just some text with no operations.");
+    expect(result.operations.length).toBe(0);
+  });
+});
+
+// ============================================================
+// applyBlockOperations — BLOCK_REPLACE
+// ============================================================
+
+describe("applyBlockOperations: BLOCK_REPLACE", () => {
+  const ops = [{
     type: "BLOCK_REPLACE" as const,
     filePath: "src/test.ts",
     segmentKey: "fn:hello",
-    content: `export function hello(): void {\n  console.log("HELLO_V2");\n}`,
-  },
-  {
+    content: `export function hello(): void {\n  console.log("REPLACED");\n}`,
+  }];
+
+  const result = applyBlockOperations(sourceContent, ops, segments);
+
+  it("succeeds", () => {
+    expect(result.success).toBe(true);
+  });
+
+  it("content was replaced", () => {
+    expect(result.content).toContain("REPLACED");
+  });
+
+  it("other function untouched", () => {
+    expect(result.content).toContain("world");
+  });
+
+  it("preamble untouched", () => {
+    expect(result.content).toContain("import { foo }");
+  });
+});
+
+// ============================================================
+// applyBlockOperations — BLOCK_INSERT_AFTER
+// ============================================================
+
+describe("applyBlockOperations: BLOCK_INSERT_AFTER", () => {
+  const ops = [{
+    type: "BLOCK_INSERT_AFTER" as const,
+    filePath: "src/test.ts",
+    segmentKey: "fn:hello",
+    content: `export function newFunc(): void {\n  console.log("new");\n}`,
+  }];
+
+  const result = applyBlockOperations(sourceContent, ops, segments);
+
+  it("succeeds", () => {
+    expect(result.success).toBe(true);
+  });
+
+  it("new function was inserted", () => {
+    expect(result.content).toContain("newFunc");
+  });
+
+  it("original hello still exists", () => {
+    expect(result.content).toContain("hello");
+  });
+
+  it("original world still exists", () => {
+    expect(result.content).toContain("world");
+  });
+
+  it("hello before newFunc, newFunc before world", () => {
+    const helloIdx = result.content!.indexOf("hello");
+    const newFuncIdx = result.content!.indexOf("newFunc");
+    const worldIdx = result.content!.indexOf("world");
+    expect(helloIdx).toBeLessThan(newFuncIdx);
+    expect(newFuncIdx).toBeLessThan(worldIdx);
+  });
+});
+
+// ============================================================
+// applyBlockOperations — BLOCK_DELETE
+// ============================================================
+
+describe("applyBlockOperations: BLOCK_DELETE", () => {
+  const ops = [{
+    type: "BLOCK_DELETE" as const,
+    filePath: "src/test.ts",
+    segmentKey: "fn:hello",
+  }];
+
+  const result = applyBlockOperations(sourceContent, ops, segments);
+
+  it("succeeds", () => {
+    expect(result.success).toBe(true);
+  });
+
+  it("hello function was deleted", () => {
+    expect(result.content).not.toContain("fn hello");
+  });
+
+  it("world function still exists", () => {
+    expect(result.content).toContain("world");
+  });
+
+  it("preamble still exists", () => {
+    expect(result.content).toContain("import { foo }");
+  });
+});
+
+// ============================================================
+// applyBlockOperations — Missing segment error
+// ============================================================
+
+describe("applyBlockOperations: Missing segment error", () => {
+  const ops = [{
     type: "BLOCK_REPLACE" as const,
     filePath: "src/test.ts",
-    segmentKey: "fn:world",
-    content: `export function world(): string {\n  return "WORLD_V2";\n}`,
-  },
-];
+    segmentKey: "fn:nonexistent",
+    content: "whatever",
+  }];
 
-const multiApply = applyBlockOperations(sourceContent, multiOps, segments);
-assert(multiApply.success, "Multiple ops succeeded");
-assert(multiApply.content!.includes("HELLO_V2"), "First replacement applied");
-assert(multiApply.content!.includes("WORLD_V2"), "Second replacement applied");
-assert(multiApply.content!.includes("import { foo }"), "Preamble intact");
+  const result = applyBlockOperations(sourceContent, ops, segments);
 
-// --- Test: isRtdiffResponse ---
+  it("fails", () => {
+    expect(result.success).toBe(false);
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- isRtdiffResponse ---\x1b[0m\n");
+  it("error mentions PatchTargetError", () => {
+    expect(result.error).toContain("PatchTargetError");
+  });
 
-assert(isRtdiffResponse("BLOCK_REPLACE: src/a.ts :: fn:foo\n---\ncode\n---"), "Detects BLOCK_REPLACE");
-assert(isRtdiffResponse("PREAMBLE_REPLACE: src/a.ts\n---\ncode\n---"), "Detects PREAMBLE_REPLACE");
-assert(isRtdiffResponse("RTDIFF/1\n\nBLOCK_DELETE: src/a.ts :: fn:foo"), "Detects RTDIFF header");
-assert(!isRtdiffResponse("Just some text with no operations"), "Rejects plain text");
-assert(!isRtdiffResponse("EDIT: src/a.ts\n<<<< SEARCH\nfoo\n====\nbar\n>>>> REPLACE"), "Rejects EDIT: format");
+  it("error mentions the missing key", () => {
+    expect(result.error).toContain("fn:nonexistent");
+  });
 
-// --- Test: isLegacyEditResponse ---
+  it("error lists available segments", () => {
+    expect(result.error).toContain("fn:hello");
+  });
+});
 
-console.log("\n\x1b[1m\x1b[36m--- isLegacyEditResponse ---\x1b[0m\n");
+// ============================================================
+// applyBlockOperations — Multiple ops (bottom-to-top)
+// ============================================================
 
-assert(isLegacyEditResponse("EDIT: src/a.ts\n<<<< SEARCH\nfoo\n====\nbar\n>>>> REPLACE"), "Detects EDIT: at line start");
-assert(!isLegacyEditResponse("BLOCK_REPLACE: src/a.ts :: fn:foo"), "Rejects BLOCK ops");
-assert(!isLegacyEditResponse("some text with EDIT: inside"), "Rejects EDIT: mid-line");
+describe("applyBlockOperations: Multiple ops (bottom-to-top)", () => {
+  const ops = [
+    {
+      type: "BLOCK_REPLACE" as const,
+      filePath: "src/test.ts",
+      segmentKey: "fn:hello",
+      content: `export function hello(): void {\n  console.log("HELLO_V2");\n}`,
+    },
+    {
+      type: "BLOCK_REPLACE" as const,
+      filePath: "src/test.ts",
+      segmentKey: "fn:world",
+      content: `export function world(): string {\n  return "WORLD_V2";\n}`,
+    },
+  ];
 
-// --- Test: PREAMBLE_REPLACE apply ---
+  const result = applyBlockOperations(sourceContent, ops, segments);
 
-console.log("\n\x1b[1m\x1b[36m--- applyBlockOperations: PREAMBLE_REPLACE ---\x1b[0m\n");
+  it("succeeds", () => {
+    expect(result.success).toBe(true);
+  });
 
-const preambleOps = [{
-  type: "PREAMBLE_REPLACE" as const,
-  filePath: "src/test.ts",
-  segmentKey: "preamble",
-  content: `import { newThing } from "new-package";`,
-}];
+  it("first replacement applied", () => {
+    expect(result.content).toContain("HELLO_V2");
+  });
 
-const preambleApply = applyBlockOperations(sourceContent, preambleOps, segments);
-assert(preambleApply.success, "PREAMBLE_REPLACE succeeded");
-assert(preambleApply.content!.includes("newThing"), "New preamble content present");
-assert(!preambleApply.content!.includes("import { foo }"), "Old preamble replaced");
-assert(preambleApply.content!.includes("hello"), "Functions still intact");
+  it("second replacement applied", () => {
+    expect(result.content).toContain("WORLD_V2");
+  });
 
-// --- Results ---
+  it("preamble intact", () => {
+    expect(result.content).toContain("import { foo }");
+  });
+});
 
-console.log(`\n\x1b[1m==================================================\x1b[0m`);
-console.log(`\x1b[1m  Results: ${passed} passed, ${failed} failed, ${passed + failed} total\x1b[0m`);
-console.log(`\x1b[1m==================================================\x1b[0m`);
+// ============================================================
+// isRtdiffResponse
+// ============================================================
 
-if (failed > 0) process.exit(1);
+describe("isRtdiffResponse", () => {
+  it("detects BLOCK_REPLACE", () => {
+    expect(isRtdiffResponse("BLOCK_REPLACE: src/a.ts :: fn:foo\n---\ncode\n---")).toBe(true);
+  });
+
+  it("detects PREAMBLE_REPLACE", () => {
+    expect(isRtdiffResponse("PREAMBLE_REPLACE: src/a.ts\n---\ncode\n---")).toBe(true);
+  });
+
+  it("detects RTDIFF header", () => {
+    expect(isRtdiffResponse("RTDIFF/1\n\nBLOCK_DELETE: src/a.ts :: fn:foo")).toBe(true);
+  });
+
+  it("rejects plain text", () => {
+    expect(isRtdiffResponse("Just some text with no operations")).toBe(false);
+  });
+
+  it("rejects EDIT: format", () => {
+    expect(isRtdiffResponse("EDIT: src/a.ts\n<<<< SEARCH\nfoo\n====\nbar\n>>>> REPLACE")).toBe(false);
+  });
+});
+
+// ============================================================
+// isLegacyEditResponse
+// ============================================================
+
+describe("isLegacyEditResponse", () => {
+  it("detects EDIT: at line start", () => {
+    expect(isLegacyEditResponse("EDIT: src/a.ts\n<<<< SEARCH\nfoo\n====\nbar\n>>>> REPLACE")).toBe(true);
+  });
+
+  it("rejects BLOCK ops", () => {
+    expect(isLegacyEditResponse("BLOCK_REPLACE: src/a.ts :: fn:foo")).toBe(false);
+  });
+
+  it("rejects EDIT: mid-line", () => {
+    expect(isLegacyEditResponse("some text with EDIT: inside")).toBe(false);
+  });
+});
+
+// ============================================================
+// PREAMBLE_REPLACE apply
+// ============================================================
+
+describe("applyBlockOperations: PREAMBLE_REPLACE", () => {
+  const ops = [{
+    type: "PREAMBLE_REPLACE" as const,
+    filePath: "src/test.ts",
+    segmentKey: "preamble",
+    content: `import { newThing } from "new-package";`,
+  }];
+
+  const result = applyBlockOperations(sourceContent, ops, segments);
+
+  it("succeeds", () => {
+    expect(result.success).toBe(true);
+  });
+
+  it("new preamble content present", () => {
+    expect(result.content).toContain("newThing");
+  });
+
+  it("old preamble replaced", () => {
+    expect(result.content).not.toContain("import { foo }");
+  });
+
+  it("functions still intact", () => {
+    expect(result.content).toContain("hello");
+  });
+});

@@ -1,26 +1,15 @@
 /**
  * Tests for block-scanner.ts — bracket-balanced block scanner
  */
+import { describe, it, expect } from "vitest";
 import { scanBlocks, generateBlockMap, findSegment } from "../src/utils/block-scanner.js";
 
-let passed = 0;
-let failed = 0;
+// ============================================================
+// Simple function detection
+// ============================================================
 
-function assert(condition: boolean, message: string) {
-  if (condition) {
-    console.log(`  \x1b[32m PASS \x1b[0m ${message}`);
-    passed++;
-  } else {
-    console.log(`  \x1b[31m FAIL \x1b[0m ${message}`);
-    failed++;
-  }
-}
-
-// --- Test: Simple function detection ---
-
-console.log("\n\x1b[1m\x1b[36m--- Simple function detection ---\x1b[0m\n");
-
-const simpleFunctions = `import { foo } from "bar";
+describe("Simple function detection", () => {
+  const simpleFunctions = `import { foo } from "bar";
 import { baz } from "qux";
 
 export function hello(): void {
@@ -32,26 +21,47 @@ export async function world(): Promise<string> {
 }
 `;
 
-const simpleResult = scanBlocks(simpleFunctions);
+  const result = scanBlocks(simpleFunctions);
 
-assert(simpleResult.segments.length >= 3, `Found ${simpleResult.segments.length} segments (expected >= 3: preamble + 2 functions)`);
-assert(findSegment(simpleResult.segments, "preamble") !== undefined, "Preamble detected");
-assert(findSegment(simpleResult.segments, "fn:hello") !== undefined, "fn:hello detected");
-assert(findSegment(simpleResult.segments, "fn:world") !== undefined, "fn:world detected");
+  it("finds preamble + 2 functions", () => {
+    expect(result.segments.length).toBeGreaterThanOrEqual(3);
+  });
 
-const preamble = findSegment(simpleResult.segments, "preamble")!;
-assert(preamble.startLine === 1, `Preamble starts at line 1 (got ${preamble.startLine})`);
-assert(preamble.endLine === 3, `Preamble ends at line 3 (got ${preamble.endLine})`);
+  it("detects preamble", () => {
+    expect(findSegment(result.segments, "preamble")).toBeDefined();
+  });
 
-const helloFn = findSegment(simpleResult.segments, "fn:hello")!;
-assert(helloFn.startLine === 4, `fn:hello starts at line 4 (got ${helloFn.startLine})`);
-assert(helloFn.endLine === 6, `fn:hello ends at line 6 (got ${helloFn.endLine})`);
+  it("detects fn:hello", () => {
+    expect(findSegment(result.segments, "fn:hello")).toBeDefined();
+  });
 
-// --- Test: Class with methods ---
+  it("detects fn:world", () => {
+    expect(findSegment(result.segments, "fn:world")).toBeDefined();
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- Class with methods ---\x1b[0m\n");
+  it("preamble starts at line 1", () => {
+    expect(findSegment(result.segments, "preamble")!.startLine).toBe(1);
+  });
 
-const classCode = `import { Base } from "./base.js";
+  it("preamble ends at line 3", () => {
+    expect(findSegment(result.segments, "preamble")!.endLine).toBe(3);
+  });
+
+  it("fn:hello starts at line 4", () => {
+    expect(findSegment(result.segments, "fn:hello")!.startLine).toBe(4);
+  });
+
+  it("fn:hello ends at line 6", () => {
+    expect(findSegment(result.segments, "fn:hello")!.endLine).toBe(6);
+  });
+});
+
+// ============================================================
+// Class with methods
+// ============================================================
+
+describe("Class with methods", () => {
+  const classCode = `import { Base } from "./base.js";
 
 export class MyService {
   private name: string;
@@ -70,19 +80,35 @@ export class MyService {
 }
 `;
 
-const classResult = scanBlocks(classCode);
+  const result = scanBlocks(classCode);
 
-assert(findSegment(classResult.segments, "preamble") !== undefined, "Preamble detected");
-assert(findSegment(classResult.segments, "class:MyService") !== undefined, "class:MyService detected");
-assert(findSegment(classResult.segments, "class:MyService#constructor") !== undefined, "class:MyService#constructor detected");
-assert(findSegment(classResult.segments, "class:MyService#run") !== undefined, "class:MyService#run detected");
-assert(findSegment(classResult.segments, "class:MyService#create") !== undefined, "class:MyService#create detected");
+  it("detects preamble", () => {
+    expect(findSegment(result.segments, "preamble")).toBeDefined();
+  });
 
-// --- Test: Arrow function exports ---
+  it("detects class:MyService", () => {
+    expect(findSegment(result.segments, "class:MyService")).toBeDefined();
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- Arrow function exports ---\x1b[0m\n");
+  it("detects class:MyService#constructor", () => {
+    expect(findSegment(result.segments, "class:MyService#constructor")).toBeDefined();
+  });
 
-const arrowCode = `import chalk from "chalk";
+  it("detects class:MyService#run", () => {
+    expect(findSegment(result.segments, "class:MyService#run")).toBeDefined();
+  });
+
+  it("detects class:MyService#create", () => {
+    expect(findSegment(result.segments, "class:MyService#create")).toBeDefined();
+  });
+});
+
+// ============================================================
+// Arrow function exports
+// ============================================================
+
+describe("Arrow function exports", () => {
+  const arrowCode = `import chalk from "chalk";
 
 export const handler = async (req: Request): Promise<Response> => {
   return new Response("ok");
@@ -93,16 +119,23 @@ export const helper = (x: number) => {
 };
 `;
 
-const arrowResult = scanBlocks(arrowCode);
+  const result = scanBlocks(arrowCode);
 
-assert(findSegment(arrowResult.segments, "fn:handler") !== undefined, "fn:handler detected (arrow export)");
-assert(findSegment(arrowResult.segments, "fn:helper") !== undefined, "fn:helper detected (arrow export)");
+  it("detects fn:handler (arrow export)", () => {
+    expect(findSegment(result.segments, "fn:handler")).toBeDefined();
+  });
 
-// --- Test: Gap detection ---
+  it("detects fn:helper (arrow export)", () => {
+    expect(findSegment(result.segments, "fn:helper")).toBeDefined();
+  });
+});
 
-console.log("\n\x1b[1m\x1b[36m--- Gap detection ---\x1b[0m\n");
+// ============================================================
+// Gap detection
+// ============================================================
 
-const gapCode = `import { foo } from "bar";
+describe("Gap detection", () => {
+  const gapCode = `import { foo } from "bar";
 
 export function first(): void {
   console.log("first");
@@ -116,19 +149,27 @@ export function second(): void {
 }
 `;
 
-const gapResult = scanBlocks(gapCode);
+  const result = scanBlocks(gapCode);
 
-assert(findSegment(gapResult.segments, "gap:1") !== undefined, "gap:1 detected between functions");
+  it("detects gap:1 between functions", () => {
+    expect(findSegment(result.segments, "gap:1")).toBeDefined();
+  });
 
-const gap = findSegment(gapResult.segments, "gap:1")!;
-assert(gap.startLine === 6, `gap:1 starts at line 6 (got ${gap.startLine})`);
-assert(gap.endLine === 9, `gap:1 ends at line 9 (got ${gap.endLine})`);
+  it("gap:1 starts at line 6", () => {
+    expect(findSegment(result.segments, "gap:1")!.startLine).toBe(6);
+  });
 
-// --- Test: String/comment awareness ---
+  it("gap:1 ends at line 9", () => {
+    expect(findSegment(result.segments, "gap:1")!.endLine).toBe(9);
+  });
+});
 
-console.log("\n\x1b[1m\x1b[36m--- String/comment awareness ---\x1b[0m\n");
+// ============================================================
+// String/comment awareness
+// ============================================================
 
-const stringCode = `export function tricky(): string {
+describe("String/comment awareness", () => {
+  const stringCode = `export function tricky(): string {
   const a = "{ not a real brace }";
   const b = '[ also not real ]';
   const c = \`template { literal }\`;
@@ -138,17 +179,28 @@ const stringCode = `export function tricky(): string {
 }
 `;
 
-const stringResult = scanBlocks(stringCode);
-const trickyFn = findSegment(stringResult.segments, "fn:tricky");
-assert(trickyFn !== undefined, "fn:tricky detected despite braces in strings/comments");
-assert(trickyFn!.startLine === 1, `fn:tricky starts at line 1 (got ${trickyFn!.startLine})`);
-assert(trickyFn!.endLine === 8, `fn:tricky ends at line 8 (got ${trickyFn!.endLine})`);
+  const result = scanBlocks(stringCode);
+  const trickyFn = findSegment(result.segments, "fn:tricky");
 
-// --- Test: Interface and enum detection ---
+  it("detects fn:tricky despite braces in strings/comments", () => {
+    expect(trickyFn).toBeDefined();
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- Interface and enum detection ---\x1b[0m\n");
+  it("fn:tricky starts at line 1", () => {
+    expect(trickyFn!.startLine).toBe(1);
+  });
 
-const typeCode = `export interface Config {
+  it("fn:tricky ends at line 8", () => {
+    expect(trickyFn!.endLine).toBe(8);
+  });
+});
+
+// ============================================================
+// Interface and enum detection
+// ============================================================
+
+describe("Interface and enum detection", () => {
+  const typeCode = `export interface Config {
   name: string;
   value: number;
 }
@@ -159,55 +211,114 @@ export enum Status {
 }
 `;
 
-const typeResult = scanBlocks(typeCode);
+  const result = scanBlocks(typeCode);
 
-assert(findSegment(typeResult.segments, "fn:Config") !== undefined, "interface Config detected");
-assert(findSegment(typeResult.segments, "fn:Status") !== undefined, "enum Status detected");
+  it("detects interface Config", () => {
+    expect(findSegment(result.segments, "fn:Config")).toBeDefined();
+  });
 
-// --- Test: No named blocks (all preamble) ---
+  it("detects enum Status", () => {
+    expect(findSegment(result.segments, "fn:Status")).toBeDefined();
+  });
+});
 
-console.log("\n\x1b[1m\x1b[36m--- No named blocks (all preamble) ---\x1b[0m\n");
+// ============================================================
+// No named blocks (all preamble)
+// ============================================================
 
-const preambleOnly = `import { foo } from "bar";
+describe("No named blocks (all preamble)", () => {
+  const preambleOnly = `import { foo } from "bar";
 import { baz } from "qux";
 
 const X = 42;
 `;
 
-const preambleResult = scanBlocks(preambleOnly);
+  const result = scanBlocks(preambleOnly);
 
-assert(preambleResult.segments.length === 1, `Only 1 segment (got ${preambleResult.segments.length})`);
-assert(preambleResult.segments[0].key === "preamble", "It's a preamble segment");
+  it("only 1 segment", () => {
+    expect(result.segments.length).toBe(1);
+  });
 
-// --- Test: generateBlockMap ---
+  it("it's a preamble segment", () => {
+    expect(result.segments[0].key).toBe("preamble");
+  });
+});
 
-console.log("\n\x1b[1m\x1b[36m--- generateBlockMap output ---\x1b[0m\n");
+// ============================================================
+// generateBlockMap
+// ============================================================
 
-const blockMap = generateBlockMap("src/test.ts", simpleResult.segments);
-assert(blockMap.includes("[BLOCK_MAP] src/test.ts"), "Block map has correct header");
-assert(blockMap.includes("preamble"), "Block map contains preamble");
-assert(blockMap.includes("fn:hello"), "Block map contains fn:hello");
-assert(blockMap.includes("fn:world"), "Block map contains fn:world");
+describe("generateBlockMap output", () => {
+  const simpleFunctions = `import { foo } from "bar";
+import { baz } from "qux";
 
-// --- Test: findSegment ---
+export function hello(): void {
+  console.log("hello");
+}
 
-console.log("\n\x1b[1m\x1b[36m--- findSegment ---\x1b[0m\n");
+export async function world(): Promise<string> {
+  return "world";
+}
+`;
+  const result = scanBlocks(simpleFunctions);
+  const blockMap = generateBlockMap("src/test.ts", result.segments);
 
-assert(findSegment(simpleResult.segments, "fn:hello") !== undefined, "findSegment finds existing segment");
-assert(findSegment(simpleResult.segments, "fn:nonexistent") === undefined, "findSegment returns undefined for missing segment");
+  it("has correct header", () => {
+    expect(blockMap).toContain("[BLOCK_MAP] src/test.ts");
+  });
 
-// --- Test: Empty file ---
+  it("contains preamble", () => {
+    expect(blockMap).toContain("preamble");
+  });
 
-console.log("\n\x1b[1m\x1b[36m--- Empty file ---\x1b[0m\n");
+  it("contains fn:hello", () => {
+    expect(blockMap).toContain("fn:hello");
+  });
 
-const emptyResult = scanBlocks("");
-assert(emptyResult.segments.length === 0, `Empty file has no segments (got ${emptyResult.segments.length})`);
+  it("contains fn:world", () => {
+    expect(blockMap).toContain("fn:world");
+  });
+});
 
-// --- Test: Nested functions (not detected at top level) ---
+// ============================================================
+// findSegment
+// ============================================================
 
-console.log("\n\x1b[1m\x1b[36m--- Nested functions ---\x1b[0m\n");
+describe("findSegment", () => {
+  const simpleFunctions = `import { foo } from "bar";
 
-const nestedCode = `export function outer(): void {
+export function hello(): void {
+  console.log("hello");
+}
+`;
+  const result = scanBlocks(simpleFunctions);
+
+  it("finds existing segment", () => {
+    expect(findSegment(result.segments, "fn:hello")).toBeDefined();
+  });
+
+  it("returns undefined for missing segment", () => {
+    expect(findSegment(result.segments, "fn:nonexistent")).toBeUndefined();
+  });
+});
+
+// ============================================================
+// Empty file
+// ============================================================
+
+describe("Empty file", () => {
+  it("has no segments", () => {
+    const result = scanBlocks("");
+    expect(result.segments.length).toBe(0);
+  });
+});
+
+// ============================================================
+// Nested functions
+// ============================================================
+
+describe("Nested functions", () => {
+  const nestedCode = `export function outer(): void {
   function inner(): void {
     console.log("inner");
   }
@@ -215,14 +326,13 @@ const nestedCode = `export function outer(): void {
 }
 `;
 
-const nestedResult = scanBlocks(nestedCode);
-assert(findSegment(nestedResult.segments, "fn:outer") !== undefined, "Outer function detected");
-assert(findSegment(nestedResult.segments, "fn:inner") === undefined, "Inner function NOT detected (it's nested, not top-level)");
+  const result = scanBlocks(nestedCode);
 
-// --- Results ---
+  it("outer function detected", () => {
+    expect(findSegment(result.segments, "fn:outer")).toBeDefined();
+  });
 
-console.log(`\n\x1b[1m==================================================\x1b[0m`);
-console.log(`\x1b[1m  Results: ${passed} passed, ${failed} failed, ${passed + failed} total\x1b[0m`);
-console.log(`\x1b[1m==================================================\x1b[0m`);
-
-if (failed > 0) process.exit(1);
+  it("inner function NOT detected (nested, not top-level)", () => {
+    expect(findSegment(result.segments, "fn:inner")).toBeUndefined();
+  });
+});
