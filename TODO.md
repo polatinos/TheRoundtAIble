@@ -176,6 +176,7 @@
 *Bron: github.com/bfly123/claude_code_bridge — complementaire tool, geen concurrent*
 
 **v1.1 (low-risk, na tests af):**
+- [ ] `--continue` flag voor `roundtable discuss` — laadt decisions.md + laatste ronde van vorige sessie mee als context (samenhangt met chronicle/geheugen verbetering)
 - [ ] Consensus markers (`---ROUNDTABLE_CONSENSUS_BEGIN/END---`) als extra anchor boven huidige balanced-brace parser (fallback blijft, niet vervangen)
 - [ ] APPLY_COMPLETE marker — orchestrator kapt output af na marker, bespaart tokens
 - [ ] Context samenvatting voor rondes — tool outputs/code blocks comprimeren voordat ze naar volgende knight gaan (minder tokens per ronde)

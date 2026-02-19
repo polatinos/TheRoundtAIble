@@ -26,14 +26,13 @@ export class GeminiCliAdapter extends BaseAdapter {
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
-    // --approval-mode plan = read-only mode (no tool execution).
+    // -p with stdin = non-interactive prompt mode (no tool execution possible).
     // -e with empty string disables skills/extensions that cause conflicts.
-    // Gemini may still attempt tools in plan mode (exit_plan_mode, write_file)
-    // which get denied — so we accept output even on non-zero exit if stdout exists.
+    // Note: --approval-mode plan was removed because it requires experimental.plan
+    // to be enabled in Gemini config, which crashes on systems without it.
     try {
       const result = await execa(this.command, [
         "-p", "",
-        "--approval-mode", "plan",
         "-e", "",
       ], {
         input: prompt,
