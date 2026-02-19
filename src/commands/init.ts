@@ -270,6 +270,14 @@ export async function initCommand(version: string): Promise<void> {
           const existingKey = await getKey(envKey);
           if (existingKey) {
             console.log(chalk.green(`  ✓ ${tool.name} API key found`));
+            const update = await confirm(`  Replace existing ${tool.name} API key?`, false);
+            if (update) {
+              const key = await askSecret(`  Enter your new ${tool.name} API key:`);
+              if (key) {
+                await saveKey(envKey, key);
+                console.log(chalk.green(`  ✓ ${tool.name} API key updated in ${chalk.dim(getKeysPath())}`));
+              }
+            }
           } else {
             // Ask for the API key
             const key = await askSecret(`  Enter your ${tool.name} API key:`);
