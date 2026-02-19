@@ -164,9 +164,9 @@
 - [x] `roundtable manifest list` — 5 features, alle knights als lead
 
 ### Code Quality
-- [ ] `hash.ts` integratie afronden (aangemaakt maar niet overal gebruikt)
+- [x] `hash.ts` integratie afronden (gebruikt in apply.ts voor source context hashing)
 - [ ] Extra unit tests voor edge cases (consensus parsing, malformed JSON, empty responses)
-- [ ] Error recovery — wat als adapter crasht mid-discussie? Graceful failure?
+- [x] Error recovery — adapter crash mid-discussie → catch + continue met volgende knight
 
 ---
 
@@ -178,6 +178,7 @@
 **v1.1 (low-risk, na tests af):**
 - [ ] `--continue` flag voor `roundtable discuss` — laadt decisions.md + laatste ronde van vorige sessie mee als context (samenhangt met chronicle/geheugen verbetering)
 - [ ] GPT anti-ja-knikker maatregelen: devil's advocate role in system prompt, ronde-volgorde randomizen, verplicht minimaal 1 bezwaar/kanttekening per beurt
+- [ ] `--project` flag — `roundtable discuss "vraag" --project /pad/naar/project` zodat je vanuit elke folder een specifiek project kunt targeten
 - [ ] Consensus markers (`---ROUNDTABLE_CONSENSUS_BEGIN/END---`) als extra anchor boven huidige balanced-brace parser (fallback blijft, niet vervangen)
 - [ ] APPLY_COMPLETE marker — orchestrator kapt output af na marker, bespaart tokens
 - [ ] Context samenvatting voor rondes — tool outputs/code blocks comprimeren voordat ze naar volgende knight gaan (minder tokens per ronde)

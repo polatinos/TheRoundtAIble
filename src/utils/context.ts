@@ -151,13 +151,13 @@ export async function readSourceFiles(
 /**
  * Build the full project context for a discussion.
  * @param readSourceCode - if true, reads source files for deeper context (default: false)
- * @param maxSourceChars - max chars for source reading (default 20000 for discuss, code-red uses 50000)
+ * @param maxSourceChars - max chars for source reading (default 200000 for discuss, code-red uses 50000)
  */
 export async function buildContext(
   projectRoot: string,
   config: RoundtableConfig,
   readSourceCode = false,
-  maxSourceChars = 20000
+  maxSourceChars = 200_000
 ): Promise<ProjectContext> {
   const [chronicle, gitBranch, gitDiff, recentCommits, projectFiles] =
     await Promise.all([

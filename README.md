@@ -75,7 +75,7 @@ roundtable --version
 ## Quick start
 
 ```bash
-# Initialize in your project
+# Initialize in your project (run this once per project)
 cd your-project
 roundtable init
 
@@ -91,6 +91,8 @@ roundtable apply
 # Emergency bug diagnosis
 roundtable code-red "login page crashes on submit"
 ```
+
+> **Note:** Each project needs its own `roundtable init`. This creates a `.roundtable/` folder with project-specific config, chronicle (decision history), and session data. Your API keys are stored globally (`~/.theroundtaible/keys.json`), so you only enter them once.
 
 ## Commands
 
