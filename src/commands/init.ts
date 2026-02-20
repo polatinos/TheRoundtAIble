@@ -300,21 +300,13 @@ export async function initCommand(version: string): Promise<void> {
           fallback: FALLBACKS[tool.adapter],
         });
 
-        // Offer to set up fallback API key
+        // Fallback API key — only ask once, remember forever
         const fallbackAdapter = FALLBACKS[tool.adapter];
         const fallbackEnvKey = fallbackAdapter ? API_ENV_KEYS[fallbackAdapter] : undefined;
         if (fallbackEnvKey) {
           const existingFallbackKey = await getKey(fallbackEnvKey);
           if (existingFallbackKey) {
-            console.log(chalk.dim(`  ✓ ${tool.name} fallback API key already set`));
-            const update = await confirm(`  Replace existing ${tool.name} fallback API key?`, false);
-            if (update) {
-              const key = await askSecret(`  Enter your new ${tool.name} API key:`);
-              if (key) {
-                await saveKey(fallbackEnvKey, key);
-                console.log(chalk.green(`  ✓ ${tool.name} fallback API key updated`));
-              }
-            }
+            console.log(chalk.green(`  ✓ ${tool.name} fallback API key already set`));
           } else {
             const wantFallback = await confirm(`  Set up a fallback API key for ${tool.name}? (used if CLI fails)`, false);
             if (wantFallback) {
@@ -338,24 +330,14 @@ export async function initCommand(version: string): Promise<void> {
         const envKey = API_ENV_KEYS[apiAdapter];
 
         if (envKey) {
-          // Check if key already exists (env var or keystore)
           const existingKey = await getKey(envKey);
           if (existingKey) {
-            console.log(chalk.green(`  ✓ ${tool.name} API key found`));
-            const update = await confirm(`  Replace existing ${tool.name} API key?`, false);
-            if (update) {
-              const key = await askSecret(`  Enter your new ${tool.name} API key:`);
-              if (key) {
-                await saveKey(envKey, key);
-                console.log(chalk.green(`  ✓ ${tool.name} API key updated in ${chalk.dim(getKeysPath())}`));
-              }
-            }
+            console.log(chalk.green(`  ✓ ${tool.name} API key already set`));
           } else {
-            // Ask for the API key
             const key = await askSecret(`  Enter your ${tool.name} API key:`);
             if (key) {
               await saveKey(envKey, key);
-              console.log(chalk.green(`  ✓ ${tool.name} API key saved securely to ${chalk.dim(getKeysPath())}`));
+              console.log(chalk.green(`  ✓ ${tool.name} API key saved to ${chalk.dim(getKeysPath())}`));
             } else {
               apiKeyReminders.push(`  ${envKey}  # ${tool.name}`);
             }
