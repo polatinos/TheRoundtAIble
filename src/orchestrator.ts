@@ -27,6 +27,7 @@ import { appendToChronicle } from "./utils/chronicle.js";
 import { readErrorLog } from "./utils/error-log.js";
 import { readDecreeLog, getActiveDecrees, formatDecreesForPrompt } from "./utils/decree-log.js";
 import { resolveVerifyCommands } from "./utils/verify.js";
+import { createAdapter } from "./utils/adapters.js";
 
 /**
  * Fisher-Yates shuffle — randomize array order in-place.
@@ -37,6 +38,40 @@ function shuffleArray<T>(arr: T[]): T[] {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+/**
+ * Try executing a prompt with the primary adapter, falling back to a
+ * secondary adapter at runtime if the primary fails (e.g. usage limit).
+ */
+async function executeWithFallback(
+  primary: BaseAdapter,
+  knight: KnightConfig,
+  config: RoundtableConfig,
+  prompt: string,
+  timeoutMs: number,
+  adapters: Map<string, BaseAdapter>
+): Promise<string> {
+  try {
+    return await primary.execute(prompt, timeoutMs);
+  } catch (primaryError) {
+    if (!knight.fallback) throw primaryError;
+
+    // Try runtime fallback
+    let fallback = adapters.get(`__fallback_${knight.name}`);
+    if (!fallback) {
+      const created = createAdapter(knight.fallback, config, timeoutMs);
+      if (created && (await created.isAvailable())) {
+        adapters.set(`__fallback_${knight.name}`, created);
+        fallback = created;
+      }
+    }
+
+    if (!fallback) throw primaryError;
+
+    console.log(chalk.yellow(`  ${knight.name} primary adapter failed, switching to fallback (${knight.fallback})...`));
+    return await fallback.execute(prompt, timeoutMs);
+  }
 }
 
 /**
@@ -288,7 +323,7 @@ export async function runDiscussion(
 
       try {
         const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
-        const response = await adapter.execute(fullPrompt, timeoutMs);
+        const response = await executeWithFallback(adapter, knight, config, fullPrompt, timeoutMs, adapters);
         spinner.stop();
 
         // Parse consensus
@@ -717,7 +752,7 @@ export async function runDiagnosis(
 
       try {
         const timeoutMs = config.rules.timeout_per_turn_seconds * 1000;
-        const response = await adapter.execute(prompt, timeoutMs);
+        const response = await executeWithFallback(adapter, knight, config, prompt, timeoutMs, adapters);
         spinner.stop();
 
         // Parse diagnostic block
