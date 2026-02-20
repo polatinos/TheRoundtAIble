@@ -71,8 +71,12 @@ export function validateCommand(command: string): string | null {
   if (/>/.test(withoutSafeRedirects)) return "forbidden pattern: output redirect (>)";
   if (/</.test(withoutSafeRedirects)) return "forbidden pattern: input redirect (<)";
 
-  // Split by pipe to validate each segment
-  const segments = trimmed.split("|").map((s) => s.trim());
+  // Split by REAL pipes only (not grep's \| alternation syntax)
+  // Replace escaped pipes with a placeholder, split, then restore
+  const segments = trimmed
+    .replace(/\\\|/g, "\x00ESCAPED_PIPE\x00")
+    .split("|")
+    .map((s) => s.replace(/\x00ESCAPED_PIPE\x00/g, "\\|").trim());
 
   for (const segment of segments) {
     if (!segment) return "empty pipe segment";

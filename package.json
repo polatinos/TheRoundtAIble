@@ -1,6 +1,6 @@
 {
   "name": "theroundtaible",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Where no AI is King, but all serve the Code — Multi-LLM collaboration protocol",
   "type": "module",
   "main": "dist/index.js",
