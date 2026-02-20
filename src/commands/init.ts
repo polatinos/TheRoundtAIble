@@ -5,8 +5,10 @@ import { createInterface } from "node:readline/promises";
 import { execa } from "execa";
 import chalk from "chalk";
 import ora from "ora";
-import type { RoundtableConfig, KnightConfig } from "../types.js";
+import type { RoundtableConfig, KnightConfig, AdapterLocalConfig } from "../types.js";
 import { saveKey, getKey, getKeysPath } from "../utils/keys.js";
+import { detectLocalModels } from "../utils/local-detect.js";
+import type { LocalModel } from "../utils/local-detect.js";
 
 interface DetectedTool {
   name: string;
@@ -116,21 +118,85 @@ const DEFAULT_CAPABILITIES: Record<string, string[]> = {
   GPT: ["communication", "content", "explanation"],
 };
 
+interface EnabledKnight {
+  name: string;
+  adapter: string;
+  fallback?: string;
+}
+
+interface EnabledLocalKnight {
+  name: string;
+  adapter: string;    // "local-llm-{slug}"
+  endpoint: string;
+  model: string;
+}
+
 /**
  * Generate a config.json based on detected tools and user choices.
  */
 function generateConfig(
   projectName: string,
   language: string,
-  enabledKnights: { name: string; adapter: string; fallback?: string }[]
+  enabledKnights: EnabledKnight[],
+  localKnights: EnabledLocalKnight[] = [],
 ): RoundtableConfig {
-  const knights: KnightConfig[] = enabledKnights.map((k, i) => ({
+  let priority = 1;
+
+  const knights: KnightConfig[] = enabledKnights.map((k) => ({
     name: k.name,
     adapter: k.adapter,
     capabilities: DEFAULT_CAPABILITIES[k.name] || ["general"],
-    priority: i + 1,
+    priority: priority++,
     ...(k.fallback ? { fallback: k.fallback } : {}),
   }));
+
+  // Append local knights
+  for (const lk of localKnights) {
+    knights.push({
+      name: lk.name,
+      adapter: lk.adapter,
+      capabilities: DEFAULT_CAPABILITIES[lk.name] || ["code", "logic"],
+      priority: priority++,
+    });
+  }
+
+  // Build adapter_config — start with cloud adapters
+  const adapter_config: RoundtableConfig["adapter_config"] = {
+    "claude-cli": {
+      command: "claude",
+      args: ["-p", "{prompt}", "--print"],
+    },
+    "claude-api": {
+      model: "claude-sonnet-4-6",
+      env_key: "ANTHROPIC_API_KEY",
+    },
+    "gemini-cli": {
+      command: "gemini",
+      args: ["-p", "{prompt}"],
+    },
+    "gemini-api": {
+      model: "gemini-2.5-flash",
+      env_key: "GEMINI_API_KEY",
+    },
+    "openai-cli": {
+      command: "codex",
+      args: ["exec", "{prompt}"],
+    },
+    "openai-api": {
+      model: "gpt-5.2",
+      env_key: "OPENAI_API_KEY",
+    },
+  };
+
+  // Add local adapter configs
+  for (const lk of localKnights) {
+    const localCfg: AdapterLocalConfig = {
+      endpoint: lk.endpoint,
+      model: lk.model,
+      name: lk.name,
+    };
+    adapter_config[lk.adapter] = localCfg;
+  }
 
   return {
     version: "1.0",
@@ -146,32 +212,7 @@ function generateConfig(
       ignore: [".git", "node_modules", "dist", "build", ".next"],
     },
     chronicle: ".roundtable/chronicle.md",
-    adapter_config: {
-      "claude-cli": {
-        command: "claude",
-        args: ["-p", "{prompt}", "--print"],
-      },
-      "claude-api": {
-        model: "claude-sonnet-4-6",
-        env_key: "ANTHROPIC_API_KEY",
-      },
-      "gemini-cli": {
-        command: "gemini",
-        args: ["-p", "{prompt}"],
-      },
-      "gemini-api": {
-        model: "gemini-2.5-flash",
-        env_key: "GEMINI_API_KEY",
-      },
-      "openai-cli": {
-        command: "codex",
-        args: ["exec", "{prompt}"],
-      },
-      "openai-api": {
-        model: "gpt-5.2",
-        env_key: "OPENAI_API_KEY",
-      },
-    },
+    adapter_config,
   };
 }
 
@@ -205,10 +246,10 @@ export async function initCommand(version: string): Promise<void> {
   // 2. Language
   const language = await askText("  Discussion language?", "nl");
 
-  // 3. Detect tools
+  // 3. Detect all knights (CLI tools + local LLM servers)
   console.log("");
   const detectSpinner = ora("  Scouting for available knights...").start();
-  const tools = await detectTools();
+  const [tools, localModels] = await Promise.all([detectTools(), detectLocalModels()]);
   detectSpinner.succeed("  Scouting complete");
 
   for (const tool of tools) {
@@ -219,9 +260,13 @@ export async function initCommand(version: string): Promise<void> {
     console.log(`${icon} ${chalk.bold(tool.name)} ${chalk.dim(`(${tool.command})`)} — ${status}`);
   }
 
+  for (const model of localModels) {
+    console.log(`${chalk.green("  +")} ${chalk.bold(model.name)} ${chalk.dim(`(${model.source})`)} — ${chalk.green("local")}`);
+  }
+
   // 4. Let user choose which knights to enable
   console.log("");
-  const enabledKnights: { name: string; adapter: string; fallback?: string }[] = [];
+  const enabledKnights: EnabledKnight[] = [];
 
   const FALLBACKS: Record<string, string> = {
     "claude-cli": "claude-api",
@@ -325,14 +370,30 @@ export async function initCommand(version: string): Promise<void> {
     }
   }
 
-  if (enabledKnights.length === 0) {
+  // 4b. Seat local LLM models (already detected in step 3)
+  const enabledLocalKnights: EnabledLocalKnight[] = [];
+
+  for (const model of localModels) {
+    const use = await confirm(`  Seat ${model.name} at the table?`, true);
+    if (use) {
+      const slug = model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      enabledLocalKnights.push({
+        name: model.name,
+        adapter: `local-llm-${slug}`,
+        endpoint: model.endpoint,
+        model: model.modelId,
+      });
+    }
+  }
+
+  if (enabledKnights.length === 0 && enabledLocalKnights.length === 0) {
     console.log(chalk.red("\n  A roundtable with no knights is just a table."));
     console.log(chalk.dim("  Re-run `roundtable init` and enable at least one knight."));
     return;
   }
 
   // 5. Generate config
-  const config = generateConfig(projectName, language, enabledKnights);
+  const config = generateConfig(projectName, language, enabledKnights, enabledLocalKnights);
 
   // 6. Create folder structure
   console.log("");

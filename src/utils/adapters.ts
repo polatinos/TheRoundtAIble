@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { RoundtableConfig, AdapterCliConfig, AdapterApiConfig } from "../types.js";
+import type { RoundtableConfig, AdapterCliConfig, AdapterApiConfig, AdapterLocalConfig } from "../types.js";
 import { BaseAdapter } from "../adapters/base.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
 import { ClaudeApiAdapter } from "../adapters/claude-api.js";
@@ -7,6 +7,7 @@ import { GeminiCliAdapter } from "../adapters/gemini-cli.js";
 import { GeminiApiAdapter } from "../adapters/gemini-api.js";
 import { OpenAICliAdapter } from "../adapters/openai-cli.js";
 import { OpenAIApiAdapter } from "../adapters/openai-api.js";
+import { LocalLlmAdapter } from "../adapters/local-llm.js";
 
 /**
  * Create an adapter instance for a given adapter ID.
@@ -41,8 +42,16 @@ export function createAdapter(
       const cfg = config.adapter_config["openai-api"] as AdapterApiConfig | undefined;
       return new OpenAIApiAdapter(cfg?.model || "gpt-5.2", cfg?.env_key || "OPENAI_API_KEY", timeoutMs);
     }
-    default:
+    default: {
+      // Handle dynamic local-llm-{name} adapters
+      if (adapterId.startsWith("local-llm")) {
+        const cfg = config.adapter_config[adapterId] as AdapterLocalConfig | undefined;
+        if (cfg?.endpoint && cfg?.model) {
+          return new LocalLlmAdapter(cfg.endpoint, cfg.model, cfg.name || adapterId, timeoutMs);
+        }
+      }
       return null;
+    }
   }
 }
 

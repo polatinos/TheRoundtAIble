@@ -25,7 +25,13 @@ export interface AdapterApiConfig {
   env_key: string;
 }
 
-export type AdapterConfig = Record<string, AdapterCliConfig | AdapterApiConfig>;
+export interface AdapterLocalConfig {
+  endpoint: string;   // e.g. "http://localhost:1234"
+  model: string;      // e.g. "qwen/qwen2.5-coder-14b"
+  name?: string;      // display name override
+}
+
+export type AdapterConfig = Record<string, AdapterCliConfig | AdapterApiConfig | AdapterLocalConfig>;
 
 export interface RoundtableConfig {
   version: string;
