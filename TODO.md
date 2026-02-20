@@ -177,12 +177,30 @@
 
 **v1.1 (low-risk, na tests af):**
 - [ ] `--continue` flag voor `roundtable discuss` — laadt decisions.md + laatste ronde van vorige sessie mee als context (samenhangt met chronicle/geheugen verbetering)
-- [ ] GPT anti-ja-knikker maatregelen: devil's advocate role in system prompt, ronde-volgorde randomizen, verplicht minimaal 1 bezwaar/kanttekening per beurt
+- [x] GPT anti-ja-knikker maatregelen: ronde-volgorde shuffle (ronde 2+), anti-copycat regels in system prompt, unieke bijdrage vereist — DONE in v0.3.5 (alleen discuss, code-red nog niet)
+- [ ] Code-red parity met discuss:
+  - [ ] Round shuffle (ronde 2+) toevoegen aan diagnostic orchestrator (regel 620, nu vaste priority)
+  - [ ] Anti-copycat regels toevoegen aan code-red-prompt.md (aangepast voor diagnose: unieke evidence vereist, niet herhalen wat andere artsen al zeiden)
 - [ ] `--project` flag — `roundtable discuss "vraag" --project /pad/naar/project` zodat je vanuit elke folder een specifiek project kunt targeten
 - [ ] Consensus markers (`---ROUNDTABLE_CONSENSUS_BEGIN/END---`) als extra anchor boven huidige balanced-brace parser (fallback blijft, niet vervangen)
 - [ ] APPLY_COMPLETE marker — orchestrator kapt output af na marker, bespaart tokens
 - [ ] Context samenvatting voor rondes — tool outputs/code blocks comprimeren voordat ze naar volgende knight gaan (minder tokens per ronde)
 - [ ] Stale lock detection — PID-based check op `state.json` zodat crashed sessies niet locken
+- [x] Knight verificatie tools (#7): knights kunnen BEWIJS leveren tijdens discuss
+  - [x] Port `file_requests` van code-red naar discuss (orchestrator leest bestanden tussen rondes)
+  - [x] Nieuw: `verify_commands` — read-only shell commando's (ls, grep, cat, find) die orchestrator veilig uitvoert
+  - [x] Whitelist voor veilige commando's, max 4 per knight per ronde, 5s timeout
+  - [x] `src/utils/verify.ts` — nieuwe module voor safe command execution
+  - [x] System prompt updaten met file_requests + verify_commands documentatie
+  - [x] Hotfix: `2>/dev/null` stderr suppression toestaan (v0.3.7)
+  - [x] Hotfix: grep `\|` alternation niet als pipe splitsen (v0.3.8)
+
+- [ ] "Summon Merlin" advies (#8): knights kunnen adviseren om taak aan main agent te geven
+  - [ ] Nieuw optioneel veld in ConsensusBlock: `summon_merlin?: string` (reden)
+  - [ ] System prompt uitleggen wanneer te gebruiken (systeembeheer, tools nodig, buiten project scope)
+  - [ ] Orchestrator: als 2+ knights `summon_merlin` invullen → toon optie 5 in King's Choice
+  - [ ] Optie 5 toont knights' redenen als uitleg
+  - [ ] Als geen knight het adviseert → optie 5 verschijnt NIET (geen default)
 
 **v2 (grotere wijzigingen):**
 - [ ] Session log reading als fallback — Claude's `.jsonl` logs lezen als stdout capture faalt (crash recovery)
