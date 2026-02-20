@@ -12,15 +12,14 @@ const WHITELISTED_COMMANDS = new Set([
 
 /**
  * Forbidden patterns that indicate command injection or write operations.
+ * NOTE: redirect checks (> < >>) are handled separately in validateCommand()
+ * after stripping safe stderr patterns like 2>/dev/null and 2>&1.
  */
 const FORBIDDEN_PATTERNS = [
   /;/,              // command chaining
   /`/,              // backtick substitution
   /\$\(/,           // $( command substitution
   /\$\{/,           // ${ variable expansion with commands
-  />/,              // output redirect
-  /</,              // input redirect
-  />>/,             // append redirect
   /&&/,             // conditional execution
   /\|\|/,           // conditional execution
   /-exec\b/,        // find -exec
@@ -63,6 +62,14 @@ export function validateCommand(command: string): string | null {
       return `forbidden pattern: ${pattern.source}`;
     }
   }
+
+  // Check redirects AFTER stripping safe stderr patterns (2>/dev/null, 2>&1)
+  const withoutSafeRedirects = trimmed
+    .replace(/2>\s*\/dev\/null/g, "")
+    .replace(/2>&1/g, "");
+  if (/>>/.test(withoutSafeRedirects)) return "forbidden pattern: append redirect (>>)";
+  if (/>/.test(withoutSafeRedirects)) return "forbidden pattern: output redirect (>)";
+  if (/</.test(withoutSafeRedirects)) return "forbidden pattern: input redirect (<)";
 
   // Split by pipe to validate each segment
   const segments = trimmed.split("|").map((s) => s.trim());
