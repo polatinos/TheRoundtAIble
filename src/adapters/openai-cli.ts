@@ -23,15 +23,33 @@ export class OpenAICliAdapter extends BaseAdapter {
     }
   }
 
+  private async isInsideGitRepo(): Promise<boolean> {
+    try {
+      await execa("git", ["rev-parse", "--is-inside-work-tree"]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
+
+    const args = ["exec", "-", "--sandbox", "read-only"];
+
+    // Only skip git repo check when not inside a git repo (or git not installed)
+    if (!(await this.isInsideGitRepo())) {
+      args.push("--skip-git-repo-check");
+    }
+
+    args.push("-o", "-");
 
     // Codex docs: "If not provided as an argument (or if `-` is used),
     // instructions are read from stdin"
     try {
       const result = await execa(
         this.command,
-        ["exec", "-", "--sandbox", "read-only", "-o", "-"],
+        args,
         {
           input: prompt,
           timeout,
