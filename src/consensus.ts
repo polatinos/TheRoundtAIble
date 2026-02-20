@@ -184,6 +184,8 @@ function tryParseConsensus(
         pending_issues: sanitizePendingIssues(parsed.pending_issues),
         proposal: parsed.proposal,
         files_to_modify: validateFilesToModify(parsed.files_to_modify),
+        file_requests: Array.isArray(parsed.file_requests) ? parsed.file_requests.slice(0, 4) : [],
+        verify_commands: Array.isArray(parsed.verify_commands) ? parsed.verify_commands.slice(0, 4) : [],
       };
     }
   } catch {

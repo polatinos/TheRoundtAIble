@@ -27,13 +27,24 @@ ANTI-COPYCAT REGELS (KRITIEK):
 15. Als je files_to_modify noemt, gebruik ECHTE paden uit de codebase. Placeholders zoals "path/to/code" zijn verboden.
 16. Als het plan gewoon goed is en je bent het eens: prima, score 9-10. Maar voeg DAN waarde toe door implementatiedetails, volgorde, of testscenario's te benoemen — niet door te herhalen wat al gezegd is.
 
+VERIFICATIE TOOLS (optioneel):
+17. Je kunt specifieke bestanden opvragen via `file_requests` in je JSON blok.
+    De orchestrator leest deze bestanden en deelt ze met alle knights in de volgende ronde.
+    Gebruik "pad:start-einde" voor specifieke regels (max 4 per ronde).
+18. Je kunt read-only shell commando's aanvragen via `verify_commands`.
+    Alleen: ls, cat, head, tail, grep, find, wc, sort, uniq, stat, file, basename, dirname.
+    Pipes naar grep/head/tail/wc/sort zijn toegestaan. Max 4 per ronde, 5s timeout.
+19. GEBRUIK VERIFICATIE als je onzeker bent. 10/10 scoren zonder bewijs is verboden.
+
 CONSENSUS JSON VOORBEELD:
 ```json
 {
-  "consensus_score": 9,
+  "consensus_score": 8,
   "agrees_with": ["refactor plan", "test strategie"],
-  "pending_issues": [],
-  "files_to_modify": ["src/index.ts", "src/utils/auth.ts", "NEW:src/utils/tokens.ts"]
+  "pending_issues": ["must verify baileys bundling"],
+  "files_to_modify": ["src/index.ts", "src/utils/auth.ts", "NEW:src/utils/tokens.ts"],
+  "file_requests": ["package.json", "src/gateway.ts:40-80"],
+  "verify_commands": ["ls node_modules/ | grep baileys", "grep -c 'makeWASocket' dist/*.js"]
 }
 ```
 

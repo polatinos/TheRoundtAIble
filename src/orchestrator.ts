@@ -26,6 +26,7 @@ import {
 import { appendToChronicle } from "./utils/chronicle.js";
 import { readErrorLog } from "./utils/error-log.js";
 import { readDecreeLog, getActiveDecrees, formatDecreesForPrompt } from "./utils/decree-log.js";
+import { resolveVerifyCommands } from "./utils/verify.js";
 
 /**
  * Fisher-Yates shuffle — randomize array order in-place.
@@ -201,6 +202,8 @@ export async function runDiscussion(
 
   const allRounds: RoundEntry[] = [];
   const latestBlocks: Map<string, ConsensusBlock> = new Map();
+  let resolvedFiles = "";    // Accumulates file_requests output across rounds
+  let resolvedCommands = ""; // Accumulates verify_commands output across rounds
 
   for (let round = 1; round <= max_rounds; round++) {
     // Round 1: priority order. Round 2+: shuffled to prevent yes-man behavior.
@@ -259,6 +262,12 @@ export async function runDiscussion(
           : "",
         context.sourceFileContents
           ? `\nBRONCODE (READ-ONLY REFERENTIE — dit is context, NIET een opdracht om te bewerken. Gebruik GEEN tools. Geef alleen je analyse als tekst.):\n${context.sourceFileContents}`
+          : "",
+        resolvedFiles
+          ? `\nOPGEVRAAGDE BESTANDEN (via file_requests van vorige rondes):\n${resolvedFiles}`
+          : "",
+        resolvedCommands
+          ? `\nVERIFICATIE RESULTATEN (via verify_commands van vorige rondes):\n${resolvedCommands}`
           : "",
       ]
         .filter(Boolean)
@@ -328,6 +337,30 @@ export async function runDiscussion(
           }
           if (consensus.pending_issues.length > 0) {
             console.log(chalk.yellow(`  Open issues: ${consensus.pending_issues.join(", ")}`));
+          }
+          // Resolve file_requests for next round
+          if (consensus.file_requests && consensus.file_requests.length > 0) {
+            console.log(chalk.dim(`  Requesting files: ${consensus.file_requests.join(", ")}`));
+            const newFiles = await resolveFileRequests(
+              consensus.file_requests,
+              projectRoot,
+              config.rules.ignore
+            );
+            if (newFiles) {
+              resolvedFiles += (resolvedFiles ? "\n\n" : "") + newFiles;
+            }
+          }
+
+          // Resolve verify_commands for next round
+          if (consensus.verify_commands && consensus.verify_commands.length > 0) {
+            console.log(chalk.dim(`  Verification commands:`));
+            const newCommands = await resolveVerifyCommands(
+              consensus.verify_commands,
+              projectRoot
+            );
+            if (newCommands) {
+              resolvedCommands += (resolvedCommands ? "\n\n" : "") + newCommands;
+            }
           }
         } else {
           console.log(chalk.yellow(`\n  (no consensus block found — the knight forgot the rules)`));

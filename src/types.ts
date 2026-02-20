@@ -45,6 +45,8 @@ export interface ConsensusBlock {
   pending_issues: string[];
   proposal?: string;
   files_to_modify?: string[];
+  file_requests?: string[];    // max 4 per round — orchestrator reads files for next round
+  verify_commands?: string[];  // max 4 per round — read-only shell commands for verification
 }
 
 export interface DiagnosticBlock {
