@@ -44,7 +44,7 @@ function shuffleArray<T>(arr: T[]): T[] {
  * Try executing a prompt with the primary adapter, falling back to a
  * secondary adapter at runtime if the primary fails (e.g. usage limit).
  */
-async function executeWithFallback(
+export async function executeWithFallback(
   primary: BaseAdapter,
   knight: KnightConfig,
   config: RoundtableConfig,
@@ -117,17 +117,23 @@ export function selectLeadKnight(
   knights: KnightConfig[],
   blocks: ConsensusBlock[]
 ): KnightConfig {
-  // The knight with the highest consensus_score in the last round is the lead
+  // Find the highest score in the last round
   const lastRoundBlocks = blocks.filter(
     (b) => b.round === Math.max(...blocks.map((x) => x.round))
   );
 
   if (lastRoundBlocks.length > 0) {
-    const best = lastRoundBlocks.reduce((a, b) =>
-      a.consensus_score >= b.consensus_score ? a : b
-    );
-    const lead = knights.find((k) => k.name === best.knight);
-    if (lead) return lead;
+    const maxScore = Math.max(...lastRoundBlocks.map((b) => b.consensus_score));
+    const topScorers = lastRoundBlocks.filter((b) => b.consensus_score === maxScore);
+
+    // If tie: pick the knight with the highest priority (lowest number)
+    // This ensures the most capable knight leads, not a random one
+    const sorted = topScorers
+      .map((b) => knights.find((k) => k.name === b.knight))
+      .filter((k): k is KnightConfig => k !== undefined)
+      .sort((a, b) => a.priority - b.priority);
+
+    if (sorted.length > 0) return sorted[0];
   }
 
   // Fallback: highest priority (lowest number)

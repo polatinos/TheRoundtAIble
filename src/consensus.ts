@@ -209,15 +209,16 @@ function parseConsensusJson(
 
 
 /**
- * Check if consensus is reached: all scores >= threshold AND no pending issues.
+ * Check if consensus is reached: all scores >= threshold.
+ * When score >= threshold, pending_issues are treated as informational notes,
+ * not blocking issues. Knights often put "observations" or "notes" in
+ * pending_issues even when they fully agree (score 10/10).
  */
 export function checkConsensus(blocks: ConsensusBlock[], threshold: number): boolean {
   if (blocks.length === 0) return false;
 
   return blocks.every(
-    (block) =>
-      block.consensus_score >= threshold &&
-      block.pending_issues.length === 0
+    (block) => block.consensus_score >= threshold
   );
 }
 

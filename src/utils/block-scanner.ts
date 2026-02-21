@@ -139,17 +139,14 @@ function processLine(line: string, state: ScannerState): void {
     const ch = line[i];
     const nextCh = i + 1 < line.length ? line[i + 1] : undefined;
 
-    const isActive = advanceChar(ch, nextCh, state);
-
-    // Skip rest of line for line comments
-    if (isActive && ch === "/" && nextCh === "/") {
+    // Check for line comments BEFORE advanceChar — quotes inside
+    // comments (e.g. "doesn't", "item not found") must not affect state.
+    // Only check when we're in active code (not inside a string or block comment).
+    if (state.quoteState === "none" && !state.inBlockComment && ch === "/" && nextCh === "/") {
       break;
     }
 
-    // Skip next char for block comment end (*/)
-    if (!state.inBlockComment && ch === "*" && nextCh === "/" && i > 0) {
-      // Already handled in advanceChar
-    }
+    const isActive = advanceChar(ch, nextCh, state);
 
     // Skip next char for block comment start (/*)
     if (state.inBlockComment && ch === "/" && nextCh === "*") {
@@ -513,8 +510,29 @@ export function generateBlockMap(filePath: string, segments: SegmentInfo[]): str
 
 /**
  * Find a segment by its key in a scan result.
- * Returns undefined if not found.
+ * Tries exact match first, then fuzzy fallback for common knight mistakes:
+ *   - "fn:addItem" matches "class:ShoppingCart#addItem" (method name match)
+ *   - "class:ShoppingCart" matches "class:ShoppingCart" (exact class)
+ *   - "fn:getTotal" matches "class:ShoppingCart#getTotal" (method name match)
+ * Returns undefined if no match found.
  */
 export function findSegment(segments: SegmentInfo[], key: string): SegmentInfo | undefined {
-  return segments.find(s => s.key === key);
+  // 1. Exact match
+  const exact = segments.find(s => s.key === key);
+  if (exact) return exact;
+
+  // 2. Fuzzy: extract the method/function name from the key
+  //    "fn:addItem" → "addItem", "class:Foo#bar" → "bar"
+  const name = key.includes("#") ? key.split("#").pop()! : key.split(":").pop()!;
+  if (!name) return undefined;
+
+  // 3. Match against segment keys that end with #name (class method match)
+  const methodMatch = segments.find(s => s.key.endsWith(`#${name}`));
+  if (methodMatch) return methodMatch;
+
+  // 4. Match against segment keys that end with :name (standalone fn match)
+  const fnMatch = segments.find(s => s.key.endsWith(`:${name}`));
+  if (fnMatch) return fnMatch;
+
+  return undefined;
 }
