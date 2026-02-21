@@ -146,13 +146,17 @@ export class LocalLlmAdapter extends BaseAdapter {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
+      // Dynamic max_tokens: leave room for prompt within context window
+      // Default to 4096 — a 14B model won't produce quality output beyond that anyway
+      const maxTokens = 4096;
+
       const response = await fetch(`${this.endpoint}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 16384,
+          max_tokens: maxTokens,
         }),
         signal: controller.signal,
       });
