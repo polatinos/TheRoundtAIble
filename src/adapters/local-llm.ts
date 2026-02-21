@@ -49,15 +49,22 @@ export class LocalLlmAdapter extends BaseAdapter {
   }
 
   /**
-   * Max source chars budget based on detected context window.
+   * Max source chars budget based on detected or assumed context window.
+   * - Ollama: uses detected context from /api/show
+   * - LM Studio: assumes 16384 (common default, can't detect via API)
+   * - Unknown: returns undefined (use default 200KB)
    * Reserves 4096 tokens for response + 3000 for system prompt/rounds overhead.
    */
   override getMaxSourceChars(): number | undefined {
-    if (!this.detectedContextTokens) return undefined;
+    // Use detected context, or conservative default for LM Studio
+    const contextTokens = this.detectedContextTokens
+      ?? (this.source === "LM Studio" ? 16384 : undefined);
+
+    if (!contextTokens) return undefined;
 
     const responseReserve = 4096;
     const overheadReserve = 3000; // system prompt, chronicle, discussion rounds
-    const availableTokens = Math.max(this.detectedContextTokens - responseReserve - overheadReserve, 2000);
+    const availableTokens = Math.max(contextTokens - responseReserve - overheadReserve, 2000);
     // ~4 chars per token (rough estimate)
     return availableTokens * 4;
   }
@@ -146,17 +153,15 @@ export class LocalLlmAdapter extends BaseAdapter {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
-      // Dynamic max_tokens: leave room for prompt within context window
-      // Default to 4096 — a 14B model won't produce quality output beyond that anyway
-      const maxTokens = 4096;
-
+      // Don't send max_tokens — let the server auto-determine based on remaining
+      // context window. Sending max_tokens risks prompt + max_tokens > context_length
+      // which LM Studio rejects outright.
       const response = await fetch(`${this.endpoint}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: maxTokens,
         }),
         signal: controller.signal,
       });
