@@ -29,6 +29,7 @@ export interface AdapterLocalConfig {
   endpoint: string;   // e.g. "http://localhost:1234"
   model: string;      // e.g. "qwen/qwen2.5-coder-14b"
   name?: string;      // display name override
+  source?: "Ollama" | "LM Studio";  // detected platform — drives API format & error handling
 }
 
 export type AdapterConfig = Record<string, AdapterCliConfig | AdapterApiConfig | AdapterLocalConfig>;

@@ -129,6 +129,7 @@ interface EnabledLocalKnight {
   adapter: string;    // "local-llm-{slug}"
   endpoint: string;
   model: string;
+  source: string;     // "Ollama" | "LM Studio"
 }
 
 /**
@@ -194,6 +195,7 @@ function generateConfig(
       endpoint: lk.endpoint,
       model: lk.model,
       name: lk.name,
+      source: lk.source as AdapterLocalConfig["source"],
     };
     adapter_config[lk.adapter] = localCfg;
   }
@@ -364,8 +366,18 @@ export async function initCommand(version: string): Promise<void> {
         adapter: `local-llm-${slug}`,
         endpoint: model.endpoint,
         model: model.modelId,
+        source: model.source,
       });
     }
+  }
+
+  // Show LM Studio setup tip if any LM Studio models were seated
+  const hasLmStudio = enabledLocalKnights.some((k) => k.source === "LM Studio");
+  if (hasLmStudio) {
+    console.log(chalk.yellow("\n  ⚠  LM Studio setup required:"));
+    console.log(chalk.white("     → Context Length: set to 16384+ (default 4096 is too small)"));
+    console.log(chalk.white("     → Response Limit: set to 4096+ (or uncheck the limit)"));
+    console.log(chalk.dim("     Find these in: Developer tab → Model Settings"));
   }
 
   if (enabledKnights.length === 0 && enabledLocalKnights.length === 0) {

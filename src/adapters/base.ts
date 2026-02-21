@@ -14,6 +14,15 @@ export abstract class BaseAdapter {
 
   abstract isAvailable(): Promise<boolean>;
 
+  /**
+   * Max chars for source context injection. Local adapters return a budget
+   * based on their detected context window. Cloud adapters return undefined
+   * (= use default 200KB).
+   */
+  getMaxSourceChars(): number | undefined {
+    return undefined;
+  }
+
   parseConsensus(response: string, round: number): ConsensusBlock | null {
     return parseConsensusFromResponse(response, this.name, round);
   }

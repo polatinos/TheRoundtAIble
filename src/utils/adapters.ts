@@ -47,7 +47,7 @@ export function createAdapter(
       if (adapterId.startsWith("local-llm")) {
         const cfg = config.adapter_config[adapterId] as AdapterLocalConfig | undefined;
         if (cfg?.endpoint && cfg?.model) {
-          return new LocalLlmAdapter(cfg.endpoint, cfg.model, cfg.name || adapterId, timeoutMs);
+          return new LocalLlmAdapter(cfg.endpoint, cfg.model, cfg.name || adapterId, cfg.source, timeoutMs);
         }
       }
       return null;
@@ -74,6 +74,13 @@ export async function initializeAdapters(
 
     const primaryAvailable = await primary.isAvailable();
     if (primaryAvailable) {
+      // Detect context window for local adapters
+      if (primary instanceof LocalLlmAdapter) {
+        const ctx = await primary.detectContextWindow();
+        if (ctx) {
+          console.log(chalk.dim(`  ${knight.name}: detected ${Math.round(ctx / 1024)}K context window`));
+        }
+      }
       adapters.set(knight.adapter, primary);
       console.log(chalk.green(`  \u2713 ${knight.name} ready (${knight.adapter})`));
       continue;

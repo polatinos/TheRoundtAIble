@@ -207,9 +207,22 @@ export async function runDiscussion(
 ): Promise<SessionResult> {
   const { max_rounds, consensus_threshold } = config.rules;
 
+  // Calculate source context budget — use the smallest budget across all adapters
+  // so all knights see the same context (fairness)
+  let maxSourceChars = 200_000;
+  for (const knight of config.knights) {
+    const adapter = adapters.get(knight.adapter);
+    if (adapter) {
+      const budget = adapter.getMaxSourceChars();
+      if (budget !== undefined && budget < maxSourceChars) {
+        maxSourceChars = budget;
+      }
+    }
+  }
+
   // Build project context (optionally including source files)
   const contextSpinner = ora("  Gathering intel from the codebase...").start();
-  const context = await buildContext(projectRoot, config, readSourceCode);
+  const context = await buildContext(projectRoot, config, readSourceCode, maxSourceChars);
 
   // Load manifest for implementation status
   const manifest = await readManifest(projectRoot);
