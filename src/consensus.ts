@@ -173,6 +173,19 @@ function tryParseConsensus(
   knightName: string,
   round: number
 ): ConsensusBlock | null {
+  // Try raw first, then repaired (handles comments, trailing commas, single quotes)
+  for (const attempt of [json, repairJson(json)]) {
+    const result = parseConsensusJson(attempt, knightName, round);
+    if (result) return result;
+  }
+  return null;
+}
+
+function parseConsensusJson(
+  json: string,
+  knightName: string,
+  round: number
+): ConsensusBlock | null {
   try {
     const parsed = JSON.parse(json);
     if (typeof parsed.consensus_score === "number") {
@@ -193,6 +206,7 @@ function tryParseConsensus(
   }
   return null;
 }
+
 
 /**
  * Check if consensus is reached: all scores >= threshold AND no pending issues.
@@ -283,12 +297,16 @@ export function fuzzyMatch(a: string, b: string): number {
 }
 
 /**
- * Attempt to repair broken JSON: strip trailing commas before } or ].
+ * Attempt to repair broken JSON from LLM output.
+ * - Strip single-line comments (// ...)
+ * - Strip trailing commas before } or ]
+ * - Replace single quotes with double quotes
  */
 function repairJson(raw: string): string {
   return raw
-    .replace(/,\s*([}\]])/g, "$1")
-    .replace(/'/g, '"');
+    .replace(/\/\/[^\n]*/g, "")       // strip // comments (local LLMs love these)
+    .replace(/,\s*([}\]])/g, "$1")    // strip trailing commas
+    .replace(/'/g, '"');              // single → double quotes
 }
 
 /**
