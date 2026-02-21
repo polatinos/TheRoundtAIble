@@ -7,7 +7,7 @@ import { writeDecisions, updateStatus } from "../utils/session.js";
 import { askKingsDecree, askParleyMode } from "../utils/decree.js";
 import { addDecreeEntry } from "../utils/decree-log.js";
 import { applyCommand } from "./apply.js";
-import type { SessionResult, RoundEntry } from "../types.js";
+import type { SessionResult, RoundEntry, ContinueOptions } from "../types.js";
 
 const rl = () =>
   createInterface({ input: process.stdin, output: process.stdout });
@@ -36,6 +36,7 @@ async function askReadCodebase(): Promise<boolean> {
 
 /**
  * The `roundtable discuss` command.
+ * Loops when the King sends knights back for another attempt.
  */
 export async function discussCommand(topic: string): Promise<void> {
   const projectRoot = process.cwd();
@@ -65,16 +66,35 @@ export async function discussCommand(topic: string): Promise<void> {
   // Ask if knights should read the codebase
   const readCodebase = await askReadCodebase();
 
-  // Run the discussion
-  const result = await runDiscussion(topic, config, adapters, projectRoot, readCodebase);
+  // Discussion loop — continues when King sends knights back
+  let result = await runDiscussion(topic, config, adapters, projectRoot, readCodebase);
 
-  // Final output
-  console.log(chalk.bold("\n" + "=".repeat(50)));
+  while (true) {
+    console.log(chalk.bold("\n" + "=".repeat(50)));
 
-  if (result.consensus) {
-    await handleConsensus(result);
-  } else {
-    await handleNoConsensus(result, topic);
+    if (result.consensus) {
+      await handleConsensus(result);
+      break;
+    }
+
+    const action = await handleNoConsensus(result, topic);
+
+    if (action !== "send_back") {
+      break;
+    }
+
+    // King demands unanimity — continue the discussion in the same session
+    console.log(chalk.bold("=".repeat(50)));
+
+    const continueFrom: ContinueOptions = {
+      sessionPath: result.sessionPath,
+      allRounds: result.allRounds,
+      startRound: result.rounds + 1,
+      resolvedFiles: result.resolvedFiles || "",
+      resolvedCommands: result.resolvedCommands || "",
+    };
+
+    result = await runDiscussion(topic, config, adapters, projectRoot, readCodebase, continueFrom);
   }
 
   console.log(chalk.bold("=".repeat(50) + "\n"));
@@ -114,11 +134,12 @@ async function handleConsensus(result: SessionResult): Promise<void> {
 
 /**
  * No consensus — let the King choose a knight's proposal or send them back.
+ * Returns "send_back" if the King wants another round, "done" otherwise.
  */
 async function handleNoConsensus(
   result: SessionResult,
   topic: string
-): Promise<void> {
+): Promise<"send_back" | "done"> {
   const projectRoot = process.cwd();
 
   console.log(chalk.bold.yellow("  The knights have agreed to disagree. As usual."));
@@ -130,7 +151,7 @@ async function handleNoConsensus(
 
   if (knightProposals.length === 0) {
     console.log(chalk.dim("\n  No proposals to choose from. The knights were useless today."));
-    return;
+    return "done";
   }
 
   // Show each knight's position
@@ -168,13 +189,12 @@ async function handleNoConsensus(
 
   if (isNaN(choice) || choice < 1 || choice > knightProposals.length + 1) {
     console.log(chalk.dim("  The King waves dismissively. Perhaps another time."));
-    return;
+    return "done";
   }
 
   if (choice === knightProposals.length + 1) {
-    console.log(chalk.dim("  Back to the table! The King demands unanimity."));
-    console.log(chalk.dim('  Run `roundtable discuss` again when the knights have cooled down.'));
-    return;
+    // King sends them back — signal the loop to continue
+    return "send_back";
   }
 
   // King chose a knight
@@ -230,6 +250,8 @@ async function handleNoConsensus(
     await addDecreeEntry(projectRoot, "deferred", sessionName, topic, `King chose ${chosen.knight}'s plan, court adjourned`);
     console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
   }
+
+  return "done";
 }
 
 interface KnightProposal {

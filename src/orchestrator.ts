@@ -11,6 +11,7 @@ import type {
   DiagnosticBlock,
   DiagnosisResult,
   SessionResult,
+  ContinueOptions,
 } from "./types.js";
 import { BaseAdapter, classifyError, AdapterError } from "./adapters/base.js";
 import { checkConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence, warnMissingScopeAtConsensus } from "./consensus.js";
@@ -203,13 +204,15 @@ function roundHeader(round: number, maxRounds: number): string {
 
 /**
  * Run a full discussion between knights until consensus or max rounds.
+ * When `continueFrom` is provided, resumes an existing session instead of starting fresh.
  */
 export async function runDiscussion(
   topic: string,
   config: RoundtableConfig,
   adapters: Map<string, BaseAdapter>,
   projectRoot: string,
-  readSourceCode = false
+  readSourceCode = false,
+  continueFrom?: ContinueOptions
 ): Promise<SessionResult> {
   const { max_rounds, consensus_threshold } = config.rules;
 
@@ -245,27 +248,48 @@ export async function runDiscussion(
     contextSpinner.succeed(`  Context assembled (manifest: ${manifest.features.length} features, decrees: ${activeDecrees.length})`);
   }
 
-  // Create session
-  const sessionPath = await createSession(projectRoot, topic);
-  console.log(chalk.dim(`  Session: ${sessionPath}`));
+  // Reuse existing session or create new one
+  const sessionPath = continueFrom
+    ? continueFrom.sessionPath
+    : await createSession(projectRoot, topic);
+
+  if (continueFrom) {
+    console.log(chalk.bold.yellow("\n  The King has spoken. Back to the table, knights!\n"));
+  } else {
+    console.log(chalk.dim(`  Session: ${sessionPath}`));
+  }
 
   // First round: sort by priority. Later rounds: shuffle to prevent yes-man behavior.
   const sortedKnights = [...config.knights].sort(
     (a, b) => a.priority - b.priority
   );
 
-  const allRounds: RoundEntry[] = [];
+  // Restore state from previous run or start fresh
+  const allRounds: RoundEntry[] = continueFrom ? [...continueFrom.allRounds] : [];
   const latestBlocks: Map<string, ConsensusBlock> = new Map();
-  let resolvedFiles = "";    // Accumulates file_requests output across rounds
-  let resolvedCommands = ""; // Accumulates verify_commands output across rounds
+  let resolvedFiles = continueFrom?.resolvedFiles || "";
+  let resolvedCommands = continueFrom?.resolvedCommands || "";
 
-  for (let round = 1; round <= max_rounds; round++) {
-    // Round 1: priority order. Round 2+: shuffled to prevent yes-man behavior.
-    const roundOrder = round === 1
+  // Rebuild latestBlocks from previous rounds
+  if (continueFrom) {
+    for (const entry of continueFrom.allRounds) {
+      if (entry.consensus) {
+        latestBlocks.set(entry.knight, entry.consensus);
+      }
+    }
+  }
+
+  const startRound = continueFrom?.startRound || 1;
+  const endRound = startRound + max_rounds - 1;
+
+  for (let round = startRound; round <= endRound; round++) {
+    // First round of this run: priority order. Later rounds: shuffled to prevent yes-man behavior.
+    const isFirstRound = round === startRound && !continueFrom;
+    const roundOrder = isFirstRound
       ? sortedKnights
       : shuffleArray([...sortedKnights]);
 
-    if (round > 1) {
+    if (!isFirstRound) {
       const orderStr = roundOrder.map((k) => k.name).join(" → ");
       console.log(chalk.dim(`  Speaking order: ${orderStr}`));
     }
@@ -297,13 +321,24 @@ export async function runDiscussion(
         decreesContext
       );
 
+      const kingDemand = continueFrom
+        ? [
+            "",
+            "⚠️ THE KING HAS SENT YOU BACK TO THE TABLE.",
+            "The King demands unanimity. You MUST reach consensus this time.",
+            "Address ALL pending_issues from previous rounds. If you mostly agree, RAISE your score to 9+.",
+            "Do NOT repeat your previous arguments — build on them and CONVERGE.",
+            "",
+          ].join("\n")
+        : "";
+
       const fullPrompt = [
         systemPrompt,
         "",
         "---",
         "",
         `Onderwerp: ${topic}`,
-        "",
+        kingDemand,
         context.gitBranch ? `Git branch: ${context.gitBranch}` : "",
         context.gitDiff
           ? `Git diff (huidige wijzigingen):\n\`\`\`\n${context.gitDiff.slice(0, 3000)}\n\`\`\``
@@ -497,14 +532,16 @@ export async function runDiscussion(
         decision: lastProposal,
         blocks: currentBlocks,
         allRounds,
+        resolvedFiles,
+        resolvedCommands,
       };
     }
 
     // Escalation warning
-    if (round >= config.rules.escalate_to_user_after && round < max_rounds) {
+    if (round >= config.rules.escalate_to_user_after && round < endRound) {
       console.log(
         chalk.yellow(
-          `\n  Round ${round}: Still no consensus. ${max_rounds - round} round(s) left before escalation.`
+          `\n  Round ${round}: Still no consensus. ${endRound - round} round(s) left before escalation.`
         )
       );
     }
@@ -517,16 +554,18 @@ export async function runDiscussion(
   await updateStatus(sessionPath, {
     phase: "escalated",
     consensus_reached: false,
-    round: max_rounds,
+    round: endRound,
   });
 
   return {
     sessionPath,
     consensus: false,
-    rounds: max_rounds,
+    rounds: endRound,
     decision: null,
     blocks: Array.from(latestBlocks.values()),
     allRounds,
+    resolvedFiles,
+    resolvedCommands,
   };
 }
 

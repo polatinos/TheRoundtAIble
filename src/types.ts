@@ -128,6 +128,19 @@ export interface SessionResult {
   decision: string | null;
   blocks: ConsensusBlock[];
   allRounds: RoundEntry[];
+  /** Accumulated file_requests output — needed for "send back" continuation */
+  resolvedFiles?: string;
+  /** Accumulated verify_commands output — needed for "send back" continuation */
+  resolvedCommands?: string;
+}
+
+/** State passed to runDiscussion when the King sends knights back for another attempt. */
+export interface ContinueOptions {
+  sessionPath: string;
+  allRounds: RoundEntry[];
+  startRound: number;
+  resolvedFiles: string;
+  resolvedCommands: string;
 }
 
 // --- Manifest types ---
