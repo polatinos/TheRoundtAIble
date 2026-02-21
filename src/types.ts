@@ -173,7 +173,7 @@ export interface DecreeLog {
 
 // --- Validation types ---
 
-export type ValidationCheckType = "bracket_balance" | "artifact_detection" | "duplicate_import";
+export type ValidationCheckType = "bracket_balance" | "artifact_detection" | "duplicate_import" | "structural_integrity";
 
 export interface ValidationIssue {
   type: ValidationCheckType;

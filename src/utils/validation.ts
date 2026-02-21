@@ -1,5 +1,6 @@
 import chalk from "chalk";
-import type { ValidationIssue, ValidationReport } from "../types.js";
+import type { ValidationIssue, ValidationReport, SegmentInfo } from "../types.js";
+import { scanBlocks } from "./block-scanner.js";
 
 // --- Bracket balancing (string-aware state machine) ---
 
@@ -183,17 +184,110 @@ export function detectDuplicateImports(content: string): ValidationIssue[] {
   return issues;
 }
 
+// --- Structural integrity validation ---
+
+/**
+ * Validate structural integrity: ensure class methods haven't been "demoted"
+ * to standalone functions, and classes haven't disappeared.
+ *
+ * This catches the exact failure mode where a knight (especially GPT) reads
+ * a class, decides the methods "look like functions", and outputs them as
+ * standalone `export function` declarations — destroying the class structure.
+ *
+ * Rules:
+ *   1. Every class in "before" must still exist as a class in "after"
+ *   2. Every class_method must still be a class_method — not a standalone function
+ *   3. If a class_method name appears as a top-level function, that's "identity demotion"
+ *   4. New functions/methods are fine — we only guard against structural demolition
+ *   5. Gaps are ignored (whitespace changes don't matter)
+ */
+export function validateStructuralIntegrity(
+  beforeSegments: SegmentInfo[],
+  afterContent: string
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  // Re-scan the staged content to get "after" segments
+  const afterResult = scanBlocks(afterContent);
+  const afterSegments = afterResult.segments;
+
+  // Build lookup maps
+  const afterClasses = new Set(
+    afterSegments.filter(s => s.kind === "class").map(s => s.name!)
+  );
+  const afterMethods = new Set(
+    afterSegments.filter(s => s.kind === "class_method").map(s => s.key)
+  );
+  const afterFunctions = new Set(
+    afterSegments.filter(s => s.kind === "function").map(s => s.name!)
+  );
+
+  // Check 1: Classes must not disappear
+  const beforeClasses = beforeSegments.filter(s => s.kind === "class");
+  for (const cls of beforeClasses) {
+    if (!afterClasses.has(cls.name!)) {
+      issues.push({
+        type: "structural_integrity",
+        message: `Class '${cls.name}' was removed — structural violation`,
+        line: 0,
+        snippet: `Before: class ${cls.name} (lines ${cls.startLine}-${cls.endLine})`,
+      });
+    }
+  }
+
+  // Check 2: Class methods must not be demoted to standalone functions
+  const beforeMethods = beforeSegments.filter(s => s.kind === "class_method");
+  for (const method of beforeMethods) {
+    const methodName = method.name!;
+    const className = method.className!;
+
+    // Skip if the entire class was already flagged as missing
+    if (!afterClasses.has(className)) continue;
+
+    // Check if this method still exists as a class_method
+    const stillAMethod = afterSegments.some(
+      s => s.kind === "class_method" && s.name === methodName && s.className === className
+    );
+
+    if (!stillAMethod) {
+      // Check for "identity demotion": method name now appears as a top-level function
+      if (afterFunctions.has(methodName)) {
+        issues.push({
+          type: "structural_integrity",
+          message: `Class method '${className}#${methodName}' was demoted to standalone function — identity demotion`,
+          line: 0,
+          snippet: `Before: class_method ${className}#${methodName}, After: standalone fn:${methodName}`,
+        });
+      }
+      // Note: if the method just disappeared (deleted), that's allowed.
+      // We only block the specific case where it was CONVERTED to a function.
+    }
+  }
+
+  return issues;
+}
+
 // --- Combined validation ---
 
 /**
  * Validate a single staged file. Runs all three checks.
+ * Optionally runs structural integrity check if beforeSegments are provided.
  */
-export function validateStagedFile(path: string, content: string): ValidationReport {
+export function validateStagedFile(
+  path: string,
+  content: string,
+  beforeSegments?: SegmentInfo[]
+): ValidationReport {
   const issues: ValidationIssue[] = [
     ...checkBracketBalance(content),
     ...detectArtifacts(content),
     ...detectDuplicateImports(content),
   ];
+
+  // Structural integrity: only if we have "before" segments to compare against
+  if (beforeSegments && beforeSegments.length > 0) {
+    issues.push(...validateStructuralIntegrity(beforeSegments, content));
+  }
 
   return {
     path,
@@ -205,12 +299,19 @@ export function validateStagedFile(path: string, content: string): ValidationRep
 /**
  * Validate all staged files. Returns reports for ALL files (not just failed ones).
  * Does not stop at first failure — shows everything.
+ *
+ * @param staged - Map of file path → staged content
+ * @param beforeSegmentsMap - Optional map of file path → original segments (for structural integrity check)
  */
-export function validateAll(staged: Map<string, string>): ValidationReport[] {
+export function validateAll(
+  staged: Map<string, string>,
+  beforeSegmentsMap?: Map<string, SegmentInfo[]>
+): ValidationReport[] {
   const reports: ValidationReport[] = [];
 
   for (const [path, content] of staged) {
-    reports.push(validateStagedFile(path, content));
+    const beforeSegments = beforeSegmentsMap?.get(path);
+    reports.push(validateStagedFile(path, content, beforeSegments));
   }
 
   return reports;

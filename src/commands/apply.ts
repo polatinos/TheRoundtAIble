@@ -7,7 +7,7 @@ import { loadConfig } from "../utils/config.js";
 import { SessionError, AdapterError as AdapterErr } from "../utils/errors.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { findLatestSession, updateStatus } from "../utils/session.js";
-import { selectLeadKnight } from "../orchestrator.js";
+import { selectLeadKnight, executeWithFallback } from "../orchestrator.js";
 import {
   filterByScope,
   normalizeScopePath,
@@ -445,7 +445,7 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
 
   let result: string;
   try {
-    result = await adapter.execute(executionPrompt, timeoutMs);
+    result = await executeWithFallback(adapter, leadKnight, config, executionPrompt, timeoutMs, adapters);
     spinner.succeed(chalk.cyan(`  ${leadKnight.name} has forged the code`));
   } catch (error) {
     spinner.fail(chalk.red(`  ${leadKnight.name} dropped their sword`));
@@ -667,9 +667,9 @@ export async function applyCommand(initialNoparley = false, overrideScope = fals
     return 0;
   }
 
-  // --- VALIDATE: run all checks on staged content ---
+  // --- VALIDATE: run all checks on staged content (including structural integrity) ---
   const spinnerVal = ora(chalk.dim("  Validating staged output...")).start();
-  const reports = validateAll(staged);
+  const reports = validateAll(staged, fileSegments);
   const failedReports = reports.filter((r) => !r.passed);
 
   if (failedReports.length > 0) {
