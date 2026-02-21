@@ -141,8 +141,8 @@ export async function readSourceFiles(
   if (skippedFiles > 0) {
     const kb = Math.round(maxChars / 1024);
     console.log(chalk.yellow(`\n  ⚔️  The scrolls overflow! ${skippedFiles} file(s) skipped — the knights can only carry ${kb}KB into battle.`));
-    console.log(chalk.dim(`  Tip: For large codebases, send a knight directly: ${chalk.bold("claude -p")} or ${chalk.bold("gemini -p")}`));
-    console.log(chalk.dim(`  Or narrow the scope with ignore patterns in .roundtable/config.json\n`));
+    console.log(chalk.dim(`  Tip: For large codebases, use cloud knights (Claude, Gemini, GPT) — they handle 100K+ tokens.`));
+    console.log(chalk.dim(`  Local LLMs have smaller context windows. Narrow the scope with ignore patterns in .roundtable/config.json\n`));
   }
 
   return contents.join("\n\n");
