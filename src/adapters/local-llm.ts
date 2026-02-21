@@ -149,10 +149,12 @@ export class LocalLlmAdapter extends BaseAdapter {
         const errorBody = await response.text();
         // Detect LM Studio context window overflow
         if (this.source === "LM Studio" && this.isContextWindowError(errorBody)) {
+          const estimatedTokens = Math.ceil(prompt.length / 4);
           throw new Error(
-            `LM Studio context window too small for this prompt.\n` +
-            `  Fix: In LM Studio → Developer → Model Settings → Context Length → 16384 or higher.\n` +
-            `  Also set Response Limit to 4096+ (or uncheck the limit).`
+            `LM Studio context window too small (prompt needs ~${estimatedTokens} tokens).\n` +
+            `  Fix: In LM Studio → Developer → Model Settings → increase Context Length.\n` +
+            `  Also uncheck the Response Limit, or set it higher.\n` +
+            `  Note: higher context = more VRAM. Find the sweet spot for your GPU.`
           );
         }
         throw new Error(`Local LLM error (${response.status}): ${errorBody}`);

@@ -371,13 +371,15 @@ export async function initCommand(version: string): Promise<void> {
     }
   }
 
-  // Show LM Studio setup tip if any LM Studio models were seated
-  const hasLmStudio = enabledLocalKnights.some((k) => k.source === "LM Studio");
-  if (hasLmStudio) {
+  // Show LM Studio setup tip for each seated LM Studio model
+  const lmStudioKnights = enabledLocalKnights.filter((k) => k.source === "LM Studio");
+  if (lmStudioKnights.length > 0) {
     console.log(chalk.yellow("\n  ⚠  LM Studio setup required:"));
-    console.log(chalk.white("     → Context Length: set to 16384+ (default 4096 is too small)"));
-    console.log(chalk.white("     → Response Limit: set to 4096+ (or uncheck the limit)"));
+    console.log(chalk.white("     The default Context Length (4096) is too small for roundtable prompts."));
+    console.log(chalk.white("     → Context Length: increase to at least 16384, or as high as your model/GPU allows"));
+    console.log(chalk.white("     → Response Limit: uncheck the limit, or set to 4096+"));
     console.log(chalk.dim("     Find these in: Developer tab → Model Settings"));
+    console.log(chalk.dim("     Note: higher context = more VRAM + slower. Find the sweet spot for your setup."));
   }
 
   if (enabledKnights.length === 0 && enabledLocalKnights.length === 0) {
