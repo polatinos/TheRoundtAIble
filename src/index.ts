@@ -19,6 +19,7 @@ import {
   manifestCheckCommand,
 } from "./commands/manifest.js";
 import { RoundtableError, formatError, getExitCode } from "./utils/errors.js";
+import { checkForUpdate } from "./utils/update-check.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -206,5 +207,8 @@ manifestCmd
       handleCliError(error);
     }
   });
+
+// Fire-and-forget: check for updates without blocking CLI startup
+checkForUpdate(pkg.version);
 
 program.parse();
