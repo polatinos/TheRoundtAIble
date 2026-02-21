@@ -66,11 +66,12 @@ roundtable --version
 ### Prerequisites
 
 - Node.js 20+
-- At least one AI CLI tool installed:
+- At least one AI tool:
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `claude` command
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `gemini` command
   - [Codex CLI](https://github.com/openai/codex) — `codex` command
-  - Or an OpenAI API key (`OPENAI_API_KEY` env var) as fallback
+  - OpenAI API key (`OPENAI_API_KEY` env var) as fallback
+  - [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/) for local models
 
 ## Quick start
 
@@ -153,6 +154,7 @@ After `roundtable init`, your `.roundtable/config.json` controls everything:
 | `gemini-cli` | `gemini -p "prompt"` | Gemini Advanced | `gemini-api` |
 | `openai-cli` | `codex "prompt"` | ChatGPT Pro | `openai-api` |
 | `openai-api` | OpenAI REST API | No (API key) | — |
+| `local-llm` | OpenAI-compat or Ollama native | No (runs locally) | — |
 
 ## Code-Red mode
 
@@ -235,10 +237,58 @@ See [architecture-docs.md](architecture-docs.md) for the full technical architec
 - [x] Chronicle (persistent decision memory)
 - [x] Implementation Manifest (tracks what's been built)
 - [x] Scoped Apply (knights declare files, apply enforces scope)
+- [x] Local LLM support (Ollama, LM Studio)
 - [ ] VS Code extension
 - [ ] Web dashboard for session visualization
 - [ ] More adapters (DeepSeek, Llama, Mistral)
 - [ ] CI/CD integration (GitHub Actions)
+
+## Local LLMs
+
+TheRoundtAIble supports local models through [Ollama](https://ollama.com/) and [LM Studio](https://lmstudio.ai/). Run `roundtable init` and any running local server will be auto-detected.
+
+### Which platform should I use?
+
+**We recommend Ollama.** Here's why:
+
+| | Ollama | LM Studio |
+|---|---|---|
+| Context window | Auto-detected, set programmatically | Manual setup required |
+| Headless / CI | Yes (`ollama serve`) | No (GUI required) |
+| Model switching | Automatic via API | Manual in GUI |
+| Multi-model | Run multiple models concurrently | One model at a time |
+| Setup | `ollama pull model-name` | Download through GUI |
+
+Ollama gives TheRoundtAIble full programmatic control — context window size is detected automatically and allocated dynamically per prompt. LM Studio requires you to manually configure Context Length and Response Limit in the GUI.
+
+### Hardware requirements
+
+Local models run on your GPU. Bigger models = better discussion quality, but more VRAM:
+
+| Model size | VRAM needed | Discussion quality |
+|---|---|---|
+| 7B parameters | ~4-6 GB | Basic responses, limited reasoning |
+| 14B parameters | ~8-10 GB | Can participate, but may repeat itself |
+| 30B+ parameters | ~16-24 GB | Meaningful contributions, can hold multi-round debates |
+| 70B+ parameters | ~32-48 GB | Comparable to cloud models |
+
+**Our honest take:** Models under 30B struggle with multi-round discussions. They tend to repeat themselves, ignore other knights' arguments, and miss the collaborative spirit (no roasting!). Cloud knights (Claude, Gemini, GPT) handle 100K+ tokens and produce richer debates. Local models shine when you want privacy or offline access — but for best results, mix them with at least one cloud knight.
+
+### LM Studio setup
+
+If you choose LM Studio, you **must** manually adjust these settings (Developer tab > Model Settings):
+
+- **Context Length:** increase to at least 16384 (default 4096 is too small)
+- **Response Limit:** uncheck the limit, or set to 4096+
+
+Higher context = more VRAM and slower responses. Find the sweet spot for your GPU.
+
+### How it works under the hood
+
+- **Ollama:** Uses the native `/api/chat` endpoint with dynamic `num_ctx` — only allocates as much context as the prompt needs, saving GPU memory
+- **LM Studio:** Uses the OpenAI-compatible `/v1/chat/completions` endpoint
+- **Auto-detection:** `roundtable init` probes `localhost:11434` (Ollama) and `localhost:1234` (LM Studio), discovers loaded models, and filters out non-chat models (embeddings, TTS, etc.)
+- **Context budgeting:** The orchestrator detects each local model's context window and adjusts the source code payload so it fits — cloud knights get the full context, local knights get a trimmed version
 
 ## Known Limitations
 
