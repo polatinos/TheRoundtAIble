@@ -106,7 +106,7 @@ roundtable code-red "login page crashes on submit"
 | `roundtable apply --noparley` | Execute without file-by-file review (dangerous) |
 | `roundtable apply --dry-run` | Run full pipeline without writing files — see what would happen |
 | `roundtable apply --override-scope` | Bypass file scope enforcement (requires reason) |
-| `roundtable code-red "symptoms"` | Emergency diagnostic mode — knights become doctors |
+| `roundtable code-red "symptoms"` | Emergency diagnostic mode — *coming soon* |
 | `roundtable manifest list` | Show all tracked features in the implementation manifest |
 | `roundtable manifest check` | Check manifest for stale entries (deleted files) |
 | `roundtable manifest add <id> --files` | Manually add a feature to the manifest |
@@ -156,7 +156,9 @@ After `roundtable init`, your `.roundtable/config.json` controls everything:
 | `openai-api` | OpenAI REST API | No (API key) | — |
 | `local-llm` | OpenAI-compat or Ollama native | No (runs locally) | — |
 
-## Code-Red mode
+## Code-Red mode (coming in v1.1)
+
+> Code-Red is temporarily disabled while we focus on making `discuss` and `apply` rock-solid. The diagnostic code is written and will return in a future update. For now, use `roundtable discuss "describe the bug"` — the knights are surprisingly good at debugging through discussion.
 
 When a bug won't die, call in the doctors:
 
@@ -171,8 +173,6 @@ The knights switch to diagnostic mode:
 - **File requests:** Doctors can request specific source files as evidence
 
 When they agree on a diagnosis, you choose: **Fix now**, **Report only**, or **Log for later**.
-
-All diagnoses are tracked in `.roundtable/error-log.md` with CR-XXX IDs.
 
 ## Implementation Manifest
 
@@ -232,7 +232,7 @@ See [architecture-docs.md](architecture-docs.md) for the full technical architec
 - [x] Claude, Gemini, and OpenAI adapters
 - [x] Knight personalities (they roast each other)
 - [x] Apply decisions with Parley/No Parley modes
-- [x] Code-Red emergency diagnostic mode
+- [ ] Code-Red emergency diagnostic mode (deferred to v1.1 — focusing on discuss + apply first)
 - [x] Git-diff based discussions (`summon`)
 - [x] Chronicle (persistent decision memory)
 - [x] Implementation Manifest (tracks what's been built)

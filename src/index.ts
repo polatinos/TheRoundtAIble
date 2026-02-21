@@ -10,7 +10,7 @@ import { summonCommand } from "./commands/summon.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
-import { codeRedCommand } from "./commands/code-red.js";
+// import { codeRedCommand } from "./commands/code-red.js"; // disabled — code-red deferred to v1.1
 import { decreesCommand } from "./commands/decrees.js";
 import {
   manifestListCommand,
@@ -149,13 +149,11 @@ program
 
 program
   .command("code-red <symptoms>")
-  .description("Emergency diagnostic mode — knights become doctors")
-  .action(async (symptoms: string) => {
-    try {
-      await codeRedCommand(symptoms);
-    } catch (error) {
-      handleCliError(error);
-    }
+  .description("Emergency diagnostic mode — coming soon")
+  .action(async (_symptoms: string) => {
+    console.log(chalk.yellow("\n  ⚔️  Code-Red is under construction."));
+    console.log(chalk.white("  The knights are sharpening their diagnostic tools — this feature will return in a future update."));
+    console.log(chalk.dim("  For now, use: roundtable discuss \"describe the bug here\"\n"));
   });
 
 const manifestCmd = program
