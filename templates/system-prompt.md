@@ -58,3 +58,7 @@ IMPLEMENTATION STATUS (wat al gebouwd is — stel dit niet opnieuw voor tenzij j
 
 HUIDIGE DISCUSSIE:
 {{previous_rounds}}
+
+JOUW BEURT — REAGEER OP DIT ONDERWERP:
+{{topic}}
+Geef je analyse, mening en voorstel over BOVENSTAAND ONDERWERP. Reageer op specifieke punten van andere knights als die er zijn.

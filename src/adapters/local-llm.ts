@@ -63,10 +63,22 @@ export class LocalLlmAdapter extends BaseAdapter {
   }
 
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
-    if (this.source === "Ollama") {
-      return this.executeOllama(prompt, timeoutMs);
+    try {
+      if (this.source === "Ollama") {
+        return await this.executeOllama(prompt, timeoutMs);
+      }
+      return await this.executeOpenAICompat(prompt, timeoutMs);
+    } catch (error) {
+      // Retry once on transient "Model reloaded" error (LM Studio reloads model after settings change)
+      if (error instanceof Error && error.message.includes("Model reloaded")) {
+        await new Promise((r) => setTimeout(r, 3000));
+        if (this.source === "Ollama") {
+          return this.executeOllama(prompt, timeoutMs);
+        }
+        return this.executeOpenAICompat(prompt, timeoutMs);
+      }
+      throw error;
     }
-    return this.executeOpenAICompat(prompt, timeoutMs);
   }
 
   /**
