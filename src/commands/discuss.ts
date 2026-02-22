@@ -73,7 +73,11 @@ export async function discussCommand(topic: string): Promise<void> {
     console.log(chalk.bold("\n" + "=".repeat(50)));
 
     if (result.consensus) {
-      await handleConsensus(result);
+      if (result.unanimousRejection) {
+        handleRejection(result);
+      } else {
+        await handleConsensus(result);
+      }
       break;
     }
 
@@ -130,6 +134,18 @@ async function handleConsensus(result: SessionResult): Promise<void> {
     await addDecreeEntry(projectRoot, "deferred", sessionName, topic, "Court adjourned — decide later");
     console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
   }
+}
+
+/**
+ * Unanimous rejection — all knights agree the idea is bad.
+ * No apply needed, just inform the King.
+ */
+function handleRejection(result: SessionResult): void {
+  console.log(chalk.bold.red("  The knights unanimously reject this proposal."));
+  console.log(chalk.dim(`  Rounds: ${result.rounds}`));
+  console.log(chalk.dim(`  Session: ${result.sessionPath}`));
+  console.log(chalk.dim(`\n  Their reasoning has been recorded in decisions.md.`));
+  console.log(chalk.dim("  Perhaps a wiser question next time, Your Majesty.\n"));
 }
 
 /**

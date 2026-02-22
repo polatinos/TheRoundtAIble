@@ -128,6 +128,8 @@ export interface SessionResult {
   decision: string | null;
   blocks: ConsensusBlock[];
   allRounds: RoundEntry[];
+  /** True when all knights unanimously reject the proposal (all scores <= 3) */
+  unanimousRejection?: boolean;
   /** Accumulated file_requests output — needed for "send back" continuation */
   resolvedFiles?: string;
   /** Accumulated verify_commands output — needed for "send back" continuation */

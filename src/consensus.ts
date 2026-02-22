@@ -223,6 +223,22 @@ export function checkConsensus(blocks: ConsensusBlock[], threshold: number): boo
 }
 
 /**
+ * Check if all knights unanimously reject the proposal (negative consensus).
+ * When all knights score <= rejectionThreshold, they agree the idea is bad.
+ * This prevents wasting rounds when the answer is clearly "don't do it."
+ */
+export function checkNegativeConsensus(
+  blocks: ConsensusBlock[],
+  rejectionThreshold = 3
+): boolean {
+  if (blocks.length < 2) return false;
+
+  return blocks.every(
+    (block) => block.consensus_score <= rejectionThreshold
+  );
+}
+
+/**
  * Produce a human-readable summary of the current consensus state.
  */
 export function summarizeConsensus(blocks: ConsensusBlock[]): string {

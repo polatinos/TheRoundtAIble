@@ -14,7 +14,7 @@ import type {
   ContinueOptions,
 } from "./types.js";
 import { BaseAdapter, classifyError, AdapterError } from "./adapters/base.js";
-import { checkConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence, warnMissingScopeAtConsensus } from "./consensus.js";
+import { checkConsensus, checkNegativeConsensus, summarizeConsensus, parseDiagnosticFromResponse, checkDiagnosticConvergence, warnMissingScopeAtConsensus } from "./consensus.js";
 import { buildSystemPrompt, buildDiagnosticPrompt } from "./utils/prompt.js";
 import { buildContext, getProjectFiles, readSourceFiles } from "./utils/context.js";
 import { readManifest, getManifestSummary } from "./utils/manifest.js";
@@ -530,6 +530,46 @@ export async function runDiscussion(
         consensus: true,
         rounds: round,
         decision: lastProposal,
+        blocks: currentBlocks,
+        allRounds,
+        resolvedFiles,
+        resolvedCommands,
+      };
+    }
+
+    // Check negative consensus (unanimous rejection — all scores <= 3)
+    if (checkNegativeConsensus(currentBlocks)) {
+      console.log(chalk.bold.red("\n  A rare sight — the knights actually agree on something."));
+      console.log(chalk.bold.red("  Unfortunately, they agree that your idea is terrible.\n"));
+      console.log(summarizeConsensus(currentBlocks));
+
+      // Collect the rejection reasoning from this round
+      const rejectionSummary = allRounds
+        .filter((r) => r.round === round)
+        .map((r) => `## ${r.knight}\n\n${r.response}`)
+        .join("\n\n---\n\n");
+
+      await writeDecisions(sessionPath, topic, rejectionSummary, allRounds);
+      await updateStatus(sessionPath, {
+        phase: "consensus_reached",
+        consensus_reached: true,
+        round,
+      });
+
+      // Update chronicle with rejection
+      await appendToChronicle(projectRoot, config.chronicle, {
+        topic,
+        outcome: `Unanimous rejection in ${round} round(s). All knights advise against this.`,
+        knights: currentBlocks.map((b) => b.knight),
+        date: new Date().toISOString().slice(0, 10),
+      });
+
+      return {
+        sessionPath,
+        consensus: true,
+        unanimousRejection: true,
+        rounds: round,
+        decision: rejectionSummary,
         blocks: currentBlocks,
         allRounds,
         resolvedFiles,
