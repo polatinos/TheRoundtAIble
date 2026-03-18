@@ -4,9 +4,7 @@ import { loadConfig, ConfigError } from "../utils/config.js";
 import { initializeAdapters } from "../utils/adapters.js";
 import { runDiscussion } from "../orchestrator.js";
 import { writeDecisions, updateStatus } from "../utils/session.js";
-import { askKingsDecree, askParleyMode } from "../utils/decree.js";
 import { addDecreeEntry } from "../utils/decree-log.js";
-import { applyCommand } from "./apply.js";
 import type { SessionResult, RoundEntry, ContinueOptions } from "../types.js";
 
 const rl = () =>
@@ -105,35 +103,14 @@ export async function discussCommand(topic: string): Promise<void> {
 }
 
 /**
- * Consensus reached — ask the King if they want to apply now.
+ * Consensus reached — show the King the result.
  */
 async function handleConsensus(result: SessionResult): Promise<void> {
-  const projectRoot = process.cwd();
-
   console.log(chalk.bold.green("  A miracle has occurred. The knights actually agree."));
   console.log(chalk.dim(`  Rounds: ${result.rounds}`));
   console.log(chalk.dim(`  Session: ${result.sessionPath}`));
-
-  const decree = await askKingsDecree();
-
-  if (decree === "knights") {
-    const noparley = await askParleyMode();
-    await applyCommand(noparley);
-  } else if (decree === "self") {
-    // King will implement themselves — log as rejected_no_apply
-    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
-    const topic = result.decision?.slice(0, 80) || "unknown";
-    await addDecreeEntry(projectRoot, "rejected_no_apply", sessionName, topic, "King chose to implement manually");
-    console.log(chalk.bold("\n  Very well. The plan has been recorded."));
-    console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
-    console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
-  } else {
-    // Deferred — will decide later
-    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
-    const topic = result.decision?.slice(0, 80) || "unknown";
-    await addDecreeEntry(projectRoot, "deferred", sessionName, topic, "Court adjourned — decide later");
-    console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
-  }
+  console.log(chalk.bold("\n  The advice has been recorded."));
+  console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md\n`));
 }
 
 /**
@@ -223,49 +200,18 @@ async function handleNoConsensus(
   const color = knightColors[chosen.knight] || chalk.white;
 
   console.log(
-    chalk.bold(`\n  The King has chosen ${color(chosen.knight)}'s plan. So it shall be.`)
+    chalk.bold(`\n  The King has chosen ${color(chosen.knight)}'s advice. So it shall be.`)
   );
-
-  // Extract files_to_modify from the chosen knight's consensus block
-  const chosenEntry = result.allRounds
-    .slice()
-    .reverse()
-    .find((r) => r.knight === chosen.knight);
-  const chosenScope = chosenEntry?.consensus?.files_to_modify;
-
-  if (chosenScope && chosenScope.length > 0) {
-    console.log(chalk.cyan(`\n  Scope from ${chosen.knight}: ${chosenScope.length} file(s)`));
-    for (const f of chosenScope) {
-      const isNew = f.toUpperCase().startsWith("NEW:");
-      const display = isNew ? f.slice(4) : f;
-      console.log(isNew ? chalk.green(`    + ${display} (new)`) : chalk.dim(`    ~ ${display}`));
-    }
-  }
 
   // Write decisions.md with the chosen knight's full response
   await writeDecisions(result.sessionPath, topic, chosen.fullResponse, result.allRounds);
   await updateStatus(result.sessionPath, {
     phase: "consensus_reached",
     consensus_reached: true,
-    allowed_files: chosenScope && chosenScope.length > 0 ? chosenScope : undefined,
   });
 
-  const decree = await askKingsDecree();
-
-  if (decree === "knights") {
-    const noparley = await askParleyMode();
-    await applyCommand(noparley);
-  } else if (decree === "self") {
-    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
-    await addDecreeEntry(projectRoot, "rejected_no_apply", sessionName, topic, `King chose ${chosen.knight}'s plan, will implement manually`);
-    console.log(chalk.bold("\n  Very well. The plan has been recorded."));
-    console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md`));
-    console.log(chalk.dim("  Implement it yourself, Your Majesty. The knights bow out.\n"));
-  } else {
-    const sessionName = result.sessionPath.split(/[/\\]/).pop() || result.sessionPath;
-    await addDecreeEntry(projectRoot, "deferred", sessionName, topic, `King chose ${chosen.knight}'s plan, court adjourned`);
-    console.log(chalk.dim('\n  The court is adjourned. Run `roundtable apply` when ready.\n'));
-  }
+  console.log(chalk.bold("\n  The advice has been recorded."));
+  console.log(chalk.dim(`  Read the decision: ${result.sessionPath}/decisions.md\n`));
 
   return "done";
 }

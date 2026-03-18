@@ -79,21 +79,6 @@ export class ConsensusError extends RoundtableError {
   }
 }
 
-export class ValidationError extends RoundtableError {
-  public readonly reports: import("../types.js").ValidationReport[];
-
-  constructor(reports: import("../types.js").ValidationReport[], options?: ErrorOptions) {
-    const failedFiles = reports.filter(r => !r.passed).map(r => r.path);
-    super(
-      `Validation failed for ${failedFiles.length} file(s): ${failedFiles.join(", ")}`,
-      ExitCode.VALIDATION_ERROR,
-      { ...options, hint: "Fix the issues above or re-run the knight with a different prompt." }
-    );
-    this.name = 'ValidationError';
-    this.reports = reports;
-  }
-}
-
 /**
  * Classify an unknown error into a RoundtableError.
  * Used by adapters to wrap raw errors with proper types.

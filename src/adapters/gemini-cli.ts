@@ -26,19 +26,34 @@ export class GeminiCliAdapter extends BaseAdapter {
   async execute(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? this.defaultTimeout;
 
-    // -p with stdin = non-interactive prompt mode (no tool execution possible).
-    // -e with empty string disables skills/extensions that cause conflicts.
-    // Note: --approval-mode plan was removed because it requires experimental.plan
-    // to be enabled in Gemini config, which crashes on systems without it.
+    // --approval-mode plan = read-only mode (can read files, cannot write/execute).
+    // Without this, Gemini CLI tries to use tools in a loop and hangs.
+    // -o text = clean text output without markdown wrapping.
+    // -p "" with stdin = non-interactive prompt mode.
+    // Falls back to basic mode if --approval-mode plan fails (requires
+    // experimental.plan in Gemini config).
     try {
-      const result = await execa(this.command, [
+      let result = await execa(this.command, [
         "-p", "",
-        "-e", "",
+        "--approval-mode", "plan",
+        "-o", "text",
       ], {
         input: prompt,
         timeout,
         reject: false,
       });
+
+      // If plan mode failed (not enabled in config), retry without it
+      if (result.exitCode !== 0 && result.stderr?.includes("approval-mode")) {
+        result = await execa(this.command, [
+          "-p", "",
+          "-o", "text",
+        ], {
+          input: prompt,
+          timeout,
+          reject: false,
+        });
+      }
 
       // Gemini often exits non-zero due to tool denials in plan mode,
       // but still produces valid output on stdout. Use it if available.

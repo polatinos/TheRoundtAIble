@@ -5,12 +5,10 @@ import { createRequire } from "node:module";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { discussCommand } from "./commands/discuss.js";
-import { applyCommand } from "./commands/apply.js";
 import { summonCommand } from "./commands/summon.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { chronicleCommand } from "./commands/chronicle.js";
-// import { codeRedCommand } from "./commands/code-red.js"; // disabled — code-red deferred to v1.1
 import { decreesCommand } from "./commands/decrees.js";
 import {
   manifestListCommand,
@@ -90,20 +88,6 @@ program
   });
 
 program
-  .command("apply")
-  .description("Apply the consensus decision (Lead Knight executes)")
-  .option("--noparley", "Skip file confirmation — write everything directly (dangerous)")
-  .option("--override-scope", "Bypass scope enforcement (requires confirmation and reason)")
-  .option("--dry-run", "Run full pipeline without writing files — show what would happen")
-  .action(async (options: { noparley?: boolean; overrideScope?: boolean; dryRun?: boolean }) => {
-    try {
-      await applyCommand(options.noparley ?? false, options.overrideScope ?? false, options.dryRun ?? false);
-    } catch (error) {
-      handleCliError(error);
-    }
-  });
-
-program
   .command("summon")
   .description("Start a discussion based on current git diff")
   .action(async () => {
@@ -145,15 +129,6 @@ program
     } catch (error) {
       handleCliError(error);
     }
-  });
-
-program
-  .command("code-red <symptoms>")
-  .description("Emergency diagnostic mode — coming soon")
-  .action(async (_symptoms: string) => {
-    console.log(chalk.yellow("\n  ⚔️  Code-Red is under construction."));
-    console.log(chalk.white("  The knights are sharpening their diagnostic tools — this feature will return in a future update."));
-    console.log(chalk.dim("  For now, use: roundtable discuss \"describe the bug here\"\n"));
   });
 
 const manifestCmd = program
