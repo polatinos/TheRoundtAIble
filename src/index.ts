@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { discussCommand } from "./commands/discuss.js";
+import { adviseCommand } from "./commands/advise.js";
 import { summonCommand } from "./commands/summon.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
@@ -71,6 +72,21 @@ program
   .action(async (topic: string) => {
     try {
       await discussCommand(topic);
+    } catch (error) {
+      handleCliError(error);
+    }
+  });
+
+program
+  .command("advise <topic>")
+  .description("Get a structured decision: proposer → critic → synthesizer (v0.6 preview)")
+  .option("--proposer <name>", "override which knight proposes")
+  .option("--critic <name>", "override which knight critiques")
+  .option("--synth <name>", "override which knight synthesizes")
+  .option("--source", "include full source code in context (slower, more tokens)", false)
+  .action(async (topic: string, opts: { proposer?: string; critic?: string; synth?: string; source?: boolean }) => {
+    try {
+      await adviseCommand(topic, opts);
     } catch (error) {
       handleCliError(error);
     }
