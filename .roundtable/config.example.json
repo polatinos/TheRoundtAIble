@@ -40,7 +40,8 @@
     },
     "gemini-cli": {
       "command": "gemini",
-      "args": ["-p", "{prompt}"]
+      "args": ["-p", "{prompt}"],
+      "model": "gemini-2.5-pro"
     },
     "openai-api": {
       "model": "gpt-4o",

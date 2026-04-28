@@ -174,6 +174,7 @@ function generateConfig(
     "gemini-cli": {
       command: "gemini",
       args: ["-p", "{prompt}"],
+      model: "gemini-2.5-pro",
     },
     "gemini-api": {
       model: "gemini-2.5-flash",

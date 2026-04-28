@@ -28,7 +28,7 @@ export function createAdapter(
     }
     case "gemini-cli": {
       const cfg = config.adapter_config["gemini-cli"] as AdapterCliConfig | undefined;
-      return new GeminiCliAdapter(cfg?.command || "gemini", timeoutMs);
+      return new GeminiCliAdapter(cfg?.command || "gemini", cfg?.model, timeoutMs);
     }
     case "gemini-api": {
       const cfg = config.adapter_config["gemini-api"] as AdapterApiConfig | undefined;

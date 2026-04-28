@@ -18,6 +18,7 @@ export interface RulesConfig {
 export interface AdapterCliConfig {
   command: string;
   args: string[];
+  model?: string;
 }
 
 export interface AdapterApiConfig {
