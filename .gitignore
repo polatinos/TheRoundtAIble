@@ -15,3 +15,10 @@ theroundtaible.md
 .roundtable/chronicle.md
 .roundtable/sessions/
 .roundtable/error-log.md
+.roundtable/manifest.json
+.roundtable/decree-log.json
+.roundtable/backups/
+
+# Claude Code workspace — keep agent defs, ignore everything else
+.claude/*
+!.claude/agents/
